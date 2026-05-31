@@ -1,16 +1,18 @@
+using AfterSort.ViewModels;
+using AfterSort.ViewModels.Pages;
+using AfterSort.Views;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Data.Core;
-using Avalonia.Data.Core.Plugins;
-using System.Linq;
 using Avalonia.Markup.Xaml;
-using AfterSort.ViewModels;
-using AfterSort.Views;
+using Avalonia.Styling;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace AfterSort;
 
 public partial class App : Application
 {
+    public static readonly ThemeVariant GreyTheme = new("Grey", ThemeVariant.Light);
+
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
@@ -18,14 +20,29 @@ public partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
+        var services = new ServiceCollection();
+        ConfigureServices(services);
+        var serviceProvider = services.BuildServiceProvider();
+
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            var mainViewModel = serviceProvider.GetRequiredService<MainWindowViewModel>();
+
             desktop.MainWindow = new MainWindow
             {
-                DataContext = new MainWindowViewModel(),
+                DataContext = mainViewModel
             };
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private static void ConfigureServices(IServiceCollection services)
+    {
+        //SINGLETONS
+        services.AddSingleton<MainWindowViewModel>();
+
+        //TRANSIENTS
+        services.AddTransient<MainPageViewModel>();
     }
 }

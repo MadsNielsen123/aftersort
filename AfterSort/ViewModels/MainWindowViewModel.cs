@@ -1,6 +1,15 @@
-﻿namespace AfterSort.ViewModels;
+using AfterSort.ViewModels.Pages;
+using CommunityToolkit.Mvvm.ComponentModel;
+
+namespace AfterSort.ViewModels;
 
 public partial class MainWindowViewModel : ViewModelBase
 {
-    public string Greeting { get; } = "Welcome to Avalonia!";
+    [ObservableProperty]
+    private ViewModelBase _currentPage;
+
+    public MainWindowViewModel(MainPageViewModel defaultPage)
+    {
+        _currentPage = defaultPage;
+    }
 }

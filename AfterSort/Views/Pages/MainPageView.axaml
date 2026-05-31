@@ -1,0 +1,59 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:AfterSort.ViewModels.Pages"
+             mc:Ignorable="d" 
+             d:DesignWidth="1000" d:DesignHeight="600"
+             x:Class="AfterSort.Views.Pages.MainPageView"
+             x:DataType="vm:MainPageViewModel">
+
+   <Grid ColumnDefinitions="250, *, 250">
+        
+        <!-- LEFT SIDEPANEL -->
+        <Border Grid.Column="0" Background="{DynamicResource SidebarBackground}">
+            <TextBlock Text="Left Sidepanel Component" 
+                       Foreground="{DynamicResource PrimaryText}"
+                       HorizontalAlignment="Center" 
+                       VerticalAlignment="Center"/>
+        </Border>
+
+        <!-- CENTER CONTENT PANEL -->
+        <Grid Grid.Column="1" RowDefinitions="Auto, *, Auto">
+            <!-- Header -->
+            <Border Grid.Row="0" Background="{DynamicResource HeaderBackground}" Height="60">
+                <TextBlock Text="Header Component" 
+                           Foreground="{DynamicResource PrimaryText}"
+                           HorizontalAlignment="Center" 
+                           VerticalAlignment="Center"/>
+            </Border>
+            
+            <!-- Main Content Area -->
+            <Border Grid.Row="1" Background="{DynamicResource AppBackground}">
+                <TextBlock Text="Welcome to the Main Page!" 
+                           Foreground="{DynamicResource PrimaryText}"
+                           HorizontalAlignment="Center" 
+                           VerticalAlignment="Center" 
+                           FontSize="24"/>
+            </Border>
+
+            <!-- Footer -->
+            <Border Grid.Row="2" Background="{DynamicResource HeaderBackground}" Height="40">
+                <TextBlock Text="Footer Component" 
+                           Foreground="{DynamicResource PrimaryText}"
+                           HorizontalAlignment="Center" 
+                           VerticalAlignment="Center"/>
+            </Border>
+        </Grid>
+
+        <!-- RIGHT SIDEPANEL -->
+        <Border Grid.Column="2" Background="{DynamicResource SidebarBackground}">
+            <TextBlock Text="Right Sidepanel Component" 
+                       Foreground="{DynamicResource PrimaryText}"
+                       HorizontalAlignment="Center" 
+                       VerticalAlignment="Center"/>
+        </Border>
+
+    </Grid>
+
+</UserControl>

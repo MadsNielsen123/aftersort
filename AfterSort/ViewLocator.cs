@@ -1,8 +1,9 @@
-using System;
-using System.Diagnostics.CodeAnalysis;
+using AfterSort.ViewModels;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
-using AfterSort.ViewModels;
+using CommunityToolkit.Mvvm.ComponentModel;
+using System;
+using System.Diagnostics.CodeAnalysis;
 
 namespace AfterSort;
 
