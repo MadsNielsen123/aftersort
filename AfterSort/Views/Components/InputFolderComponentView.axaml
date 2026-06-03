@@ -1,0 +1,47 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:AfterSort.ViewModels.Components"
+             xmlns:icons="using:AfterSort.Icons"
+             mc:Ignorable="d" d:DesignWidth="230" d:DesignHeight="40"
+             x:Class="AfterSort.Views.Components.InputFolderComponentView"
+             x:DataType="vm:InputFolderComponentViewModel">
+
+    <Border Background="{DynamicResource Background2}"
+            CornerRadius="4"
+            Padding="8,6">
+
+        <Grid ColumnDefinitions="*, Auto, Auto">
+
+            <!-- Folder name (left-aligned, ellipsis on overflow) -->
+            <TextBlock Grid.Column="0"
+                       Text="{Binding FolderName}"
+                       Foreground="{DynamicResource PrimaryText}"
+                       VerticalAlignment="Center"
+                       FontSize="13"
+                       TextTrimming="CharacterEllipsis"/>
+
+            <!-- Progress counter n/m -->
+            <TextBlock Grid.Column="1"
+                       Foreground="{DynamicResource PrimaryText}"
+                       VerticalAlignment="Center"
+                       FontSize="12"
+                       Opacity="0.6"
+                       Margin="8,0,0,0">
+                <Run Text="{Binding ProcessedCount}"/><Run Text="/"/><Run Text="{Binding TotalCount}"/>
+            </TextBlock>
+
+            <!-- Checkmark icon — uses AppIcons registry (like MudBlazor Icons.Group.Name) -->
+            <PathIcon Grid.Column="2"
+                      Data="{x:Static icons:AppIcons+Status.Checkmark}"
+                      Foreground="{DynamicResource Success}"
+                      Width="12"
+                      Height="12"
+                      VerticalAlignment="Center"
+                      Margin="6,0,0,0"
+                      IsVisible="{Binding IsCompleted}"/>
+
+        </Grid>
+    </Border>
+</UserControl>
