@@ -1,0 +1,73 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:AfterSort.ViewModels.Components"
+             mc:Ignorable="d" d:DesignWidth="230" d:DesignHeight="40"
+             x:Class="AfterSort.Views.Components.FolderSelectComponentView"
+             x:DataType="vm:FolderSelectComponentViewModel"
+             x:CompileBindings="True">
+
+    <Border Background="{DynamicResource AppBackground}" 
+            CornerRadius="2"
+            BoxShadow="{DynamicResource BoxShadow1}">
+
+        <Grid RowDefinitions="Auto, *, Auto">
+            <Border Grid.Row="0"
+                    Background="{DynamicResource Background3}"
+                    Padding="5"
+                    Margin="0,0,0,10">
+
+                <Grid ColumnDefinitions="Auto, *, Auto">
+                    <TextBlock Grid.Column="0"
+                        Text="{Binding Title}"
+                        Foreground="{DynamicResource PrimaryText}"
+                        FontWeight="Bold"
+                        VerticalAlignment="Center"/>
+
+                    <Button Grid.Column="2" Content="Opt Btn"/>
+                </Grid>
+
+            </Border>
+                    
+
+            <ListBox Grid.Row="1"
+                     Margin="5"
+                     ItemsSource="{Binding Items}"
+                     SelectedItem="{Binding SelectedItem}"
+                     Background="Transparent"
+                     BorderThickness="0"
+                     Padding="0">
+                <ListBox.Styles>
+                    <Style Selector="ListBoxItem">
+                        <Setter Property="Padding" Value="0"/>
+                        <Setter Property="CornerRadius" Value="4"/>
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                    </Style>
+                </ListBox.Styles>
+                <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Spacing="5"/>
+                    </ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
+            </ListBox>
+
+            <Border Grid.Row="2"
+                    Background="{DynamicResource Background3}"
+                    Padding="5">
+
+                <Grid ColumnDefinitions="auto, auto, *, auto">
+
+                    <Button Grid.Column="0"
+                            Command="{Binding AddItemCommand}">+</Button>
+                    <Button Grid.Column="1"
+                            Command="{Binding RemoveItemCommand}">-</Button>
+                    <Button Grid.Column="3">Folder Settings</Button>
+
+                </Grid>
+
+            </Border>
+
+        </Grid>
+    </Border>
+</UserControl>

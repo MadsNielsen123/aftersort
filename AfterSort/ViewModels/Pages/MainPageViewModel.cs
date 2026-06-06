@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using AfterSort.ViewModels.Components;
 
 namespace AfterSort.ViewModels.Pages;
@@ -10,27 +9,51 @@ public partial class MainPageViewModel : ViewModelBase
 
     #region Properties
 
-    public ObservableCollection<InputFolderComponentViewModel> InputFolders { get; } = [];
+    public FolderSelectComponentViewModel InputFolders { get; }
+    public FolderSelectComponentViewModel DestFolders { get; }
 
     #endregion
 
     #region Constructors
 
-    public MainPageViewModel()
+    private readonly Services.IStorageService _storageService;
+
+    public MainPageViewModel(Services.IStorageService storageService)
     {
-        // Sample data for development — remove when real folder scanning is wired up
-        InputFolders.Add(new InputFolderComponentViewModel
+        _storageService = storageService;
+        InputFolders = new FolderSelectComponentViewModel { Title = "Input Folders" };
+        DestFolders = new FolderSelectComponentViewModel { Title = "Dest Folders" };
+
+        InputFolders.ItemFactory = async () =>
         {
-            FolderName = "Downloads",
-            ProcessedCount = 12,
-            TotalCount = 48
-        });
-        InputFolders.Add(new InputFolderComponentViewModel
+            var result = await _storageService.OpenFolderPickerAsync(new Avalonia.Platform.Storage.FolderPickerOpenOptions { Title = "Select Input Folder" });
+            if (result != null && result.Count > 0)
+            {
+                return new InputFolderComponentViewModel
+                {
+                    FolderName = result[0].Name,
+                    FolderPath = result[0].Path.LocalPath,
+                    ProcessedCount = 0,
+                    TotalCount = 0
+                };
+            }
+            return null;
+        };
+
+        DestFolders.ItemFactory = async () =>
         {
-            FolderName = "Screenshots",
-            ProcessedCount = 7,
-            TotalCount = 7
-        });
+            var result = await _storageService.OpenFolderPickerAsync(new Avalonia.Platform.Storage.FolderPickerOpenOptions { Title = "Select Destination Folder" });
+            if (result != null && result.Count > 0)
+            {
+                return new OutputFolderComponentViewModel
+                {
+                    FolderName = result[0].Name,
+                    FolderPath = result[0].Path.LocalPath
+                };
+            }
+            return null;
+        };
+
     }
 
     #endregion

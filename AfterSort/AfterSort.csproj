@@ -35,6 +35,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Update="Views\Components\FolderSelectComponentView.axaml.cs">
+      <DependentUpon>FolderSelectComponentView.axaml</DependentUpon>
+    </Compile>
     <Compile Update="Views\Components\InputFolderComponentView.axaml.cs">
       <DependentUpon>InputFolderComponentView.axaml</DependentUpon>
     </Compile>

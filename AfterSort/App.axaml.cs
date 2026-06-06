@@ -21,7 +21,7 @@ public partial class App : Application
     public override void OnFrameworkInitializationCompleted()
     {
         var services = new ServiceCollection();
-        ConfigureServices(services);
+        services.AddAfterSortServices();
         var serviceProvider = services.BuildServiceProvider();
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
@@ -35,14 +35,5 @@ public partial class App : Application
         }
 
         base.OnFrameworkInitializationCompleted();
-    }
-
-    private static void ConfigureServices(IServiceCollection services)
-    {
-        //SINGLETONS
-        services.AddSingleton<MainWindowViewModel>();
-
-        //TRANSIENTS
-        services.AddTransient<MainPageViewModel>();
     }
 }
