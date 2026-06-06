@@ -1,14 +1,65 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:AfterSort.ViewModels"
+        xmlns:chrome="using:Avalonia.Controls.Chrome"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
         x:Class="AfterSort.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
-        Icon="/Assets/images/icons/logo/aftersort-logo.ico"
-        Title="AfterSort">
+        Icon="/Assets/Images/Icons/Logo/aftersort-logo.ico"
+        Title="AfterSort"
+        WindowDecorations="Full"
+        ExtendClientAreaToDecorationsHint="True">
 
-	<ContentControl Content="{Binding CurrentPage}" />
+    <Window.Styles>
+        <Style Selector="Button#PART_CloseButton">
+            <Setter Property="Margin" Value="0,0,-1,0" /> 
+            <Setter Property="CornerRadius" Value="0" />
+        </Style>
+        <Style Selector="Button#PART_RestoreButton">
+            <Setter Property="CornerRadius" Value="0" />
+        </Style>
+        <Style Selector="Button#PART_MinimizeButton">
+            <Setter Property="CornerRadius" Value="0" />
+        </Style>
+
+        <Style Selector="Button#PART_FullScreenButton">
+            <Setter Property="IsVisible" Value="False" />
+            <Setter Property="Width" Value="0" />
+            <Setter Property="Margin" Value="0" />
+        </Style>
+
+        <Style Selector="chrome|WindowDrawnDecorations TextBlock">
+            <Setter Property="IsVisible" Value="False" />
+        </Style>
+        <Style Selector="chrome|WindowDrawnDecorations Image">
+            <Setter Property="IsVisible" Value="False" />
+        </Style>
+    </Window.Styles>
+
+    <Panel>
+
+        <Grid VerticalAlignment="Top"
+              Height="{Binding $parent[Window].WindowDecorationMargin.Top}"
+              Background="{DynamicResource Background3}"
+              WindowDecorationProperties.ElementRole="TitleBar">
+
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="15,0">
+                <Image Source="/Assets/Images/Icons/Logo/aftersort-logo.ico"
+                       Width="16" Height="16" Margin="0,0,8,0" />
+                <TextBlock Text="{Binding $parent[Window].Title}"
+                           Foreground="{DynamicResource PrimaryText}"
+                           FontSize="12"
+                           FontWeight="SemiBold" />
+            </StackPanel>
+
+        </Grid>
+
+        <Grid Margin="{Binding $parent[Window].WindowDecorationMargin}">
+            <ContentControl Content="{Binding CurrentPage}" />
+        </Grid>
+
+    </Panel>
 
 </Window>
