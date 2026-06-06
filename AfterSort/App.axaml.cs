@@ -12,6 +12,7 @@ namespace AfterSort;
 public partial class App : Application
 {
     public static readonly ThemeVariant GreyTheme = new("Grey", ThemeVariant.Light);
+    public static IServiceProvider? Services { get; private set; }
 
     public override void Initialize()
     {
@@ -20,13 +21,13 @@ public partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
-        var services = new ServiceCollection();
-        services.AddAfterSortServices();
-        var serviceProvider = services.BuildServiceProvider();
+        var serviceCollection = new ServiceCollection();
+        serviceCollection.AddAfterSortServices();
+        Services = serviceCollection.BuildServiceProvider();
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var mainViewModel = serviceProvider.GetRequiredService<MainWindowViewModel>();
+            var mainViewModel = Services.GetRequiredService<MainWindowViewModel>();
 
             desktop.MainWindow = new MainWindow
             {

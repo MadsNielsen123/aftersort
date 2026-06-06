@@ -1,7 +1,7 @@
 using AfterSort.ViewModels;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
-using CommunityToolkit.Mvvm.ComponentModel;
+using Microsoft.Extensions.DependencyInjection;
 using System;
 
 namespace AfterSort;
@@ -21,6 +21,9 @@ public class ViewLocator : IDataTemplate
 
         if (type != null)
         {
+            if (App.Services is { } services)
+                return (Control)ActivatorUtilities.CreateInstance(services, type);
+
             return (Control)Activator.CreateInstance(type)!;
         }
 

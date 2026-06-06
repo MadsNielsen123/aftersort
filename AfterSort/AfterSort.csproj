@@ -28,11 +28,7 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.8" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Folder Include="Models\" />
-    <Folder Include="ViewModels\Dialogs\" />
-    <Folder Include="Views\Dialogs\" />
-  </ItemGroup>
+
 
   <ItemGroup>
     <Compile Update="Views\Components\FolderSelectComponentView.axaml.cs">
@@ -40,6 +36,9 @@
     </Compile>
     <Compile Update="Views\Components\InputFolderComponentView.axaml.cs">
       <DependentUpon>InputFolderComponentView.axaml</DependentUpon>
+    </Compile>
+    <Compile Update="Views\Components\OutputFolderComponentView.axaml.cs">
+      <DependentUpon>OutputFolderComponentView.axaml</DependentUpon>
     </Compile>
   </ItemGroup>
   

@@ -1,13 +1,18 @@
-﻿<ResourceDictionary xmlns="https://github.com/avaloniaui"
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     
-    <SolidColorBrush x:Key="AppBackground" Color="#000" />
-    <SolidColorBrush x:Key="Background6" Color="#666666" />
-    <SolidColorBrush x:Key="Background5" Color="#999999" />
-    <SolidColorBrush x:Key="Background4" Color="#cccccc" />
-    <SolidColorBrush x:Key="Background2" Color="#e6e6e6" />
-    <SolidColorBrush x:Key="Background1" Color="#f2f2f2" />
-    <SolidColorBrush x:Key="PrimaryText" Color="#fff" />
-    <SolidColorBrush x:Key="SecondaryText" Color="#000" />
+    <SolidColorBrush x:Key="AppBackground" Color="#0d0d0d" />
+    <SolidColorBrush x:Key="Background1" Color="#161616" />
+    <SolidColorBrush x:Key="Background2" Color="#1e1e1e" />
+    <SolidColorBrush x:Key="Background3" Color="#282828" />
+    <SolidColorBrush x:Key="Background4" Color="#333333" />
+    <SolidColorBrush x:Key="Background5" Color="#404040" />
+
+    <SolidColorBrush x:Key="PrimaryText" Color="#e0e0e0" />
+    <SolidColorBrush x:Key="SecondaryText" Color="#0d0d0d" />
+
+    <SolidColorBrush x:Key="Success" Color="#4CAF50" />
+
+    <BoxShadows x:Key="BoxShadow1">0 4 10 0 #0a0a0a</BoxShadows>
 
 </ResourceDictionary>

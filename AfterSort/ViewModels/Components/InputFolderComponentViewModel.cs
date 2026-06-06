@@ -2,18 +2,12 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace AfterSort.ViewModels.Components;
 
-public partial class InputFolderComponentViewModel : ViewModelBase
+public partial class InputFolderComponentViewModel : FolderItemViewModelBase
 {
     #region Fields
     #endregion
 
     #region Properties
-
-    [ObservableProperty]
-    public partial string FolderPath { get; set; } = string.Empty;
-
-    [ObservableProperty]
-    public partial string FolderName { get; set; } = string.Empty;
 
     // Only these two properties affect the computed IsCompleted property.
     [ObservableProperty]
@@ -32,11 +26,6 @@ public partial class InputFolderComponentViewModel : ViewModelBase
     #endregion
 
     #region Constructors
-
-    public InputFolderComponentViewModel()
-    {
-    }
-
     #endregion
 
     #region Lifecycle

@@ -12,7 +12,7 @@ public partial class FolderSelectComponentViewModel : ViewModelBase
     #region Properties
 
     [ObservableProperty]
-    public partial string Title { get; set; }
+    public partial string Title { get; set; } = "Folders";
 
     public ObservableCollection<ViewModelBase> Items { get; } = [];
 
@@ -31,12 +31,6 @@ public partial class FolderSelectComponentViewModel : ViewModelBase
     #endregion
 
     #region Constructors
-
-    public FolderSelectComponentViewModel()
-    {
-        Title = "Folders";
-    }
-
     #endregion
 
     #region Lifecycle
