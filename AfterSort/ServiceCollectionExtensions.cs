@@ -11,6 +11,7 @@ public static class ServiceCollectionExtensions
     {
         // SINGLETONS
         services.AddSingleton<IStorageService, StorageService>();
+        services.AddSingleton<ISortService, SortService>();
         services.AddSingleton<MainWindowViewModel>();
 
         // TRANSIENTS

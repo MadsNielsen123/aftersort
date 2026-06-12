@@ -31,7 +31,13 @@
                        FontSize="13"
                        TextTrimming="CharacterEllipsis"/>
 
-
+            <!-- Select checkbox (right-aligned) -->
+            <CheckBox Grid.Column="1"
+                      IsChecked="{Binding IsSelected}"
+                      VerticalAlignment="Center"
+                      Margin="6,0,0,0"
+                      MinWidth="0"
+                      Padding="0"/>
 
         </Grid>
     </Border>

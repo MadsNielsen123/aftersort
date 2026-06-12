@@ -39,7 +39,7 @@
                        FontSize="12"
                        Opacity="0.6"
                        Margin="8,0,0,0">
-                <Run Text="{Binding ProcessedCount}"/><Run Text="/"/><Run Text="{Binding TotalCount}"/>
+                <Run Text="{Binding SortedFiles}"/><Run Text="/"/><Run Text="{Binding TotalFiles}"/>
             </TextBlock>
 
             <!-- Checkmark icon — uses AppIcons registry (like MudBlazor Icons.Group.Name) -->

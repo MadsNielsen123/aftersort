@@ -4,6 +4,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="using:AfterSort.ViewModels.Pages"
+             xmlns:models="using:AfterSort.Models"
              mc:Ignorable="d"
              d:DesignWidth="1000" d:DesignHeight="600"
              x:Class="AfterSort.Views.Pages.MainPageView"
@@ -13,38 +14,229 @@
     <Grid ColumnDefinitions="250, *, 250">
 
         <!-- LEFT SIDEPANEL -->
-        <Border Grid.Column="0" Background="{DynamicResource Background1}">
-            <TextBlock Text="Left Sidepanel Component"
-                       Foreground="{DynamicResource PrimaryText}"
-                       HorizontalAlignment="Center"
-                       VerticalAlignment="Center"/>
+        <Border Grid.Column="0" Background="{DynamicResource Background1}"
+                Padding="10">
+
+            <Grid RowDefinitions="Auto, *">
+
+                <!-- SORT MODE BOX -->
+                <Border Grid.Row="0"
+                        Background="{DynamicResource AppBackground}"
+                        CornerRadius="2"
+                        BoxShadow="{DynamicResource BoxShadow1}"
+                        Margin="0,0,0,10">
+
+                    <Grid RowDefinitions="Auto, Auto">
+
+                        <!-- Header -->
+                        <Border Grid.Row="0"
+                                Background="{DynamicResource Background3}"
+                                Padding="5">
+                            <TextBlock Text="Sort Mode"
+                                       Foreground="{DynamicResource PrimaryText}"
+                                       FontWeight="Bold"
+                                       VerticalAlignment="Center"/>
+                        </Border>
+
+                        <!-- Sort Mode List -->
+                        <ListBox Grid.Row="1"
+                                 Margin="5"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 Padding="0"
+                                 SelectionMode="Single"
+                                 SelectedIndex="0">
+                            <ListBox.Styles>
+                                <Style Selector="ListBoxItem">
+                                    <Setter Property="Padding" Value="8,6"/>
+                                    <Setter Property="CornerRadius" Value="4"/>
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                    <Setter Property="Margin" Value="0,2"/>
+                                </Style>
+                                <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+                                    <Setter Property="Background" Value="{DynamicResource Background3}"/>
+                                </Style>
+                            </ListBox.Styles>
+                            <ListBox.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Spacing="2"/>
+                                </ItemsPanelTemplate>
+                            </ListBox.ItemsPanel>
+
+                            <ListBoxItem>
+                                <Grid ColumnDefinitions="Auto, *">
+                                    <PathIcon Grid.Column="0"
+                                              Data="M2 2h8v8H2zM12 2h8v8h-8zM2 12h8v8H2zM12 12h8v8h-8z"
+                                              Foreground="{DynamicResource PrimaryText}"
+                                              Width="14" Height="14"
+                                              Margin="0,0,8,0"/>
+                                    <TextBlock Grid.Column="1"
+                                               Text="Multiple"
+                                               Foreground="{DynamicResource PrimaryText}"
+                                               VerticalAlignment="Center"
+                                               FontSize="13"/>
+                                </Grid>
+                            </ListBoxItem>
+
+                        </ListBox>
+
+                    </Grid>
+                </Border>
+
+                <!-- PLACEHOLDER for future left panel content -->
+                <Border Grid.Row="1"/>
+
+            </Grid>
         </Border>
 
         <!-- CENTER CONTENT PANEL -->
-        <Grid Grid.Column="1" RowDefinitions="Auto, *, Auto">
+        <!-- CENTER CONTENT PANEL -->
+        <Grid Grid.Column="1" RowDefinitions="Auto, *, Auto, Auto">
             <!-- Header -->
-            <Border Grid.Row="0" Background="{DynamicResource Background2}" Height="60">
-                <TextBlock Text="Header Component"
+            <Border Grid.Row="0" Background="{DynamicResource Background2}" Height="36">
+                <TextBlock Text="{Binding CurrentFile.FullPath, FallbackValue='No file selected'}"
                            Foreground="{DynamicResource PrimaryText}"
-                           HorizontalAlignment="Center"
-                           VerticalAlignment="Center"/>
-            </Border>
-
-            <!-- Main Content Area -->
-            <Border Grid.Row="1" Background="{DynamicResource AppBackground}">
-                <TextBlock Text="Welcome to the Main Page!"
-                           Foreground="{DynamicResource PrimaryText}"
-                           HorizontalAlignment="Center"
                            VerticalAlignment="Center"
-                           FontSize="24"/>
+                           HorizontalAlignment="Left"
+                           Margin="12,0"
+                           FontSize="12"
+                           Opacity="0.8"
+                           TextTrimming="CharacterEllipsis"/>
             </Border>
 
-            <!-- Footer -->
-            <Border Grid.Row="2" Background="{DynamicResource Background3}" Height="40">
-                <TextBlock Text="Footer Component"
-                           Foreground="{DynamicResource PrimaryText}"
-                           HorizontalAlignment="Center"
-                           VerticalAlignment="Center"/>
+            <!-- Main Content Area — File Preview -->
+            <Border Grid.Row="1" Background="{DynamicResource AppBackground}">
+                <Panel>
+                    <!-- Empty state when no files -->
+                    <StackPanel HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                IsVisible="{Binding !HasCurrentFile}">
+                        <PathIcon Data="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z"
+                                  Foreground="{DynamicResource Background4}"
+                                  Width="48" Height="48"/>
+                        <TextBlock Text="Add input folders to begin sorting"
+                                   Foreground="{DynamicResource PrimaryText}"
+                                   Opacity="0.5"
+                                   FontSize="14"
+                                   HorizontalAlignment="Center"
+                                   Margin="0,12,0,0"/>
+                    </StackPanel>
+
+                    <!-- Image preview -->
+                    <Image Source="{Binding PreviewImage}"
+                           Stretch="Uniform"
+                           Margin="20"
+                           IsVisible="{Binding IsCurrentFileImage}"/>
+
+                    <!-- Text preview (non-image files) -->
+                    <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                  VerticalScrollBarVisibility="Auto"
+                                  Margin="10"
+                                  IsVisible="{Binding !IsCurrentFileImage}">
+                        <SelectableTextBlock Text="{Binding PreviewText}"
+                                  Foreground="{DynamicResource PrimaryText}"
+                                  FontFamily="Consolas, Courier New, monospace"
+                                  FontSize="12"
+                                  Padding="10"
+                                  IsVisible="{Binding HasCurrentFile}"/>
+                    </ScrollViewer>
+
+                    <!-- Loading Indicator Overlay -->
+                    <Border Background="{DynamicResource Background3}"
+                            CornerRadius="8"
+                            Padding="16,10"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Bottom"
+                            Margin="20"
+                            IsVisible="{Binding IsLoadingFullData}"
+                            BoxShadow="{DynamicResource BoxShadow1}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <TextBlock Text="Loading full data..." VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource PrimaryText}" Opacity="0.8"/>
+                            <ProgressBar IsIndeterminate="True" Width="60" Height="4" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+                </Panel>
+            </Border>
+
+            <!-- File Controls (Video) -->
+            <Border Grid.Row="2" Background="{DynamicResource Background2}" 
+                    IsVisible="{Binding IsCurrentFileVideo}"
+                    Padding="15,8">
+                <Grid ColumnDefinitions="Auto, *, Auto">
+                    <Button Grid.Column="0" CornerRadius="16" Width="32" Height="32" Background="{DynamicResource Background4}" Padding="9">
+                        <PathIcon Data="M8 5v14l11-7z" Width="14" Height="14" Foreground="{DynamicResource PrimaryText}"/>
+                    </Button>
+                    <Slider Grid.Column="1" Margin="20,0" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="2" Text="0:00 / 0:00" VerticalAlignment="Center" Foreground="{DynamicResource PrimaryText}" FontSize="12" Opacity="0.8"/>
+                </Grid>
+            </Border>
+
+            <!-- Footer — Navigation controls (visible in Multiple mode) -->
+            <Border Grid.Row="3" Background="{DynamicResource Background3}" Height="48">
+                <StackPanel Orientation="Horizontal"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Spacing="12"
+                            MaxWidth="400">
+
+                    <!-- Previous Button -->
+                    <Button Command="{Binding GoPreviousCommand}"
+                            VerticalAlignment="Center"
+                            Padding="12,6"
+                            FontSize="13">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock Text="‹" FontSize="16" VerticalAlignment="Center"/>
+                            <TextBlock Text="Previous" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+
+                    <!-- File Counter -->
+                    <StackPanel Orientation="Horizontal"
+                                VerticalAlignment="Center"
+                                Spacing="4">
+                        <TextBox Text="{Binding CurrentFileNumber, Mode=OneWay}"
+                                 Width="50"
+                                 HorizontalContentAlignment="Center"
+                                 VerticalAlignment="Center"
+                                 FontSize="13"
+                                 Padding="4,4"
+                                 x:Name="FileNumberInput"/>
+                        <TextBlock Text="/"
+                                   Foreground="{DynamicResource PrimaryText}"
+                                   VerticalAlignment="Center"
+                                   FontSize="13"/>
+                        <TextBlock Text="{Binding TotalFileCount}"
+                                   Foreground="{DynamicResource PrimaryText}"
+                                   VerticalAlignment="Center"
+                                   FontSize="13"/>
+                    </StackPanel>
+
+                    <!-- Sorted indicator for current file -->
+                    <StackPanel Orientation="Horizontal"
+                                Spacing="4"
+                                VerticalAlignment="Center"
+                                IsVisible="{Binding CurrentFile.IsSorted, FallbackValue=False}">
+                        <PathIcon Data="M 0.92034389,8.2352928 2.5068831,10 9.2307613,0.75632134 7.8708679,0 2.5068831,7.8151258 0.76923875,5.8823411 Z"
+                                  Foreground="{DynamicResource Success}"
+                                  Width="12" Height="12"/>
+                        <TextBlock Text="Sorted"
+                                   Foreground="{DynamicResource Success}"
+                                   FontSize="12"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <!-- Next Button -->
+                    <Button Command="{Binding GoNextCommand}"
+                            VerticalAlignment="Center"
+                            Padding="12,6"
+                            FontSize="13">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock Text="Next" VerticalAlignment="Center"/>
+                            <TextBlock Text="›" FontSize="16" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+
+                </StackPanel>
             </Border>
         </Grid>
 
