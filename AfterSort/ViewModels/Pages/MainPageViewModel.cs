@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using AfterSort.Models;
@@ -5,6 +6,7 @@ using AfterSort.Services;
 using AfterSort.ViewModels.Components;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -22,6 +24,49 @@ public partial class MainPageViewModel : ViewModelBase
     /// Rebuilt whenever input folders or their contents change.
     /// </summary>
     private readonly List<FileItem> _flatFileList = [];
+
+    // === Preview pipeline state ===
+    private CancellationTokenSource? _navigationCts;
+    private readonly ConcurrentDictionary<string, Bitmap> _previewCache = new();
+    
+    /// <summary>
+    /// Tracks which file paths are currently cached for efficient eviction.
+    /// Stores (path, insertionOrder) for LRU-like eviction.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, long> _cacheInsertionOrder = new();
+    private long _cacheInsertionCounter;
+    
+    /// <summary>
+    /// Maximum number of full-quality bitmaps to keep in cache.
+    /// Higher = more memory, faster browsing of recently viewed files.
+    /// </summary>
+    private const int MaxFullQualityCache = 30;
+    
+    /// <summary>
+    /// Maximum number of preload thumbnails to keep in memory.
+    /// </summary>
+    private const int MaxPreloadCache = 100;
+    
+    /// <summary>
+    /// Throttles concurrent disk I/O to prevent thrashing.
+    /// </summary>
+    private readonly SemaphoreSlim _ioSemaphore = new(4, 4);
+    
+    /// <summary>
+    /// Debounce timer for rapid navigation.
+    /// </summary>
+    private CancellationTokenSource? _debounceCts;
+
+    /// <summary>
+    /// Set of file extensions known to be unsupported for image display.
+    /// </summary>
+    private static readonly HashSet<string> UnsupportedImageExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".heic", ".heif", ".cr2", ".cr3", ".nef", ".arw", ".dng", ".orf", ".rw2",
+        ".pef", ".srw", ".raf", ".3fr", ".kdc", ".dcr", ".raw", ".rwl", ".mrw",
+        ".nrw", ".srf", ".sr2", ".erf", ".mef", ".mos", ".psd", ".ai", ".eps",
+        ".svg", ".tga",
+    };
 
     #endregion
 
@@ -276,20 +321,30 @@ public partial class MainPageViewModel : ViewModelBase
         LoadCurrentFilePreview();
     }
 
-    private System.Threading.CancellationTokenSource? _previewCts;
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Bitmap> _previewCache = new();
+    /// <summary>
+    /// Returns true if the file extension is an unsupported image format (HEIC, RAW, etc.)
+    /// that SkiaSharp cannot decode.
+    /// </summary>
+    private static bool IsUnsupportedImageFormat(FileItem file)
+    {
+        return UnsupportedImageExtensions.Contains(file.Metadata.Extension);
+    }
 
     /// <summary>
-    /// Loads the preview content (image bitmap or text) for the current file.
+    /// Loads the preview content for the current file.
+    /// This method NEVER blocks on I/O — it shows cached/preloaded data instantly,
+    /// then kicks off background work for full quality + neighbor preloading.
     /// </summary>
-    private async void LoadCurrentFilePreview()
+    private void LoadCurrentFilePreview()
     {
-        _previewCts?.Cancel();
-        _previewCts = new System.Threading.CancellationTokenSource();
-        var token = _previewCts.Token;
+        // Cancel any previous navigation pipeline
+        _navigationCts?.Cancel();
+        _navigationCts = new CancellationTokenSource();
+        var token = _navigationCts.Token;
 
         var file = CurrentFile;
         int currentIndex = CurrentFileIndex;
+
         if (file is null)
         {
             IsCurrentFileImage = false;
@@ -300,19 +355,42 @@ public partial class MainPageViewModel : ViewModelBase
             return;
         }
 
-        // 1. Show Current Preload if available, or generate it immediately
-        if (file.PreloadData == null)
+        // === PHASE 1: Instant UI update (no I/O, no awaiting) ===
+        
+        // Handle unsupported formats immediately — no loading, no waiting
+        if (IsUnsupportedImageFormat(file))
         {
-            file.PreloadData = await System.Threading.Tasks.Task.Run(() => GeneratePreloadData(file), token);
+            PreviewImage = null;
+            PreviewText = $"Unsupported format: {file.Metadata.Extension.ToUpperInvariant()}\n\n{file.Name}\n\n({file.Metadata.FormattedSize})";
+            IsCurrentFileImage = false;
+            IsCurrentFileVideo = false;
+            IsLoadingFullData = false;
+            // Still kick off neighbor preloading
+            _ = Task.Run(() => PreloadNeighborsAsync(currentIndex, token), token);
+            return;
         }
-        if (token.IsCancellationRequested) return;
 
+        // Check if we already have full quality cached
+        if (file.IsImage && _previewCache.TryGetValue(file.FullPath, out var cachedFull))
+        {
+            PreviewImage = cachedFull;
+            PreviewText = null;
+            IsCurrentFileImage = true;
+            IsCurrentFileVideo = false;
+            IsLoadingFullData = false;
+            // Kick off neighbor preloading only
+            _ = Task.Run(() => PreloadNeighborsAsync(currentIndex, token), token);
+            return;
+        }
+
+        // Check if we have preload data already
         if (file.PreloadData is Bitmap preloadBmp)
         {
             PreviewImage = preloadBmp;
             PreviewText = null;
             IsCurrentFileImage = file.IsImage || file.IsVideo;
             IsCurrentFileVideo = file.IsVideo;
+            IsLoadingFullData = file.IsImage; // Full quality still needs loading for images
         }
         else if (file.PreloadData is string preloadStr)
         {
@@ -320,92 +398,343 @@ public partial class MainPageViewModel : ViewModelBase
             PreviewImage = null;
             IsCurrentFileImage = false;
             IsCurrentFileVideo = false;
+            IsLoadingFullData = !file.IsImage && !file.IsVideo; // Full text still loading for text files
         }
-        else
+        else if (file.IsVideo)
         {
+            // No preload yet for video — show placeholder immediately
             PreviewImage = null;
             PreviewText = null;
-        }
-
-        // Check if we already have the full quality
-        if (file.IsImage && _previewCache.TryGetValue(file.FullPath, out var cachedFull))
-        {
-            PreviewImage = cachedFull;
-            IsLoadingFullData = false;
-        }
-        else if (file.IsImage || (!file.IsImage && !file.IsVideo))
-        {
+            IsCurrentFileImage = true;
+            IsCurrentFileVideo = true;
             IsLoadingFullData = true;
         }
         else
         {
-            IsLoadingFullData = false; // Video is "loaded" once thumbnail is there
+            // No preload yet — show loading state
+            PreviewImage = null;
+            PreviewText = file.IsImage ? null : null;
+            IsCurrentFileImage = file.IsImage;
+            IsCurrentFileVideo = false;
+            IsLoadingFullData = true;
         }
 
-        // 2. Start the background coordinator
-        _ = System.Threading.Tasks.Task.Run(async () => 
-        {
-            // Priority 2: ±10 Preloads
-            await GeneratePreloadsAsync(currentIndex, 10, token);
-            if (token.IsCancellationRequested) return;
+        // === PHASE 2: Background pipeline (ordered by priority) ===
+        _ = RunBackgroundPipelineAsync(file, currentIndex, token);
+    }
 
-            // Priority 3: Full quality of current file
-            if (file.IsImage && !_previewCache.ContainsKey(file.FullPath))
+    /// <summary>
+    /// Background pipeline that loads data in priority order:
+    /// 1. Current file preload (if missing)
+    /// 2. Current file full quality
+    /// 3. Neighbor preloads
+    /// 4. Neighbor full qualities
+    /// </summary>
+    private async Task RunBackgroundPipelineAsync(FileItem file, int currentIndex, CancellationToken token)
+    {
+        try
+        {
+            // Priority 1: Current file preload thumbnail (if not already loaded)
+            if (file.PreloadData == null)
             {
-                var fullBmp = LoadImageWithExif(file.FullPath);
-                if (fullBmp != null)
+                var preloadData = await Task.Run(() =>
                 {
-                    _previewCache.TryAdd(file.FullPath, fullBmp);
-                    if (!token.IsCancellationRequested)
+                    try { return GeneratePreloadData(file); }
+                    catch (OperationCanceledException) { return null; }
+                }, token);
+
+                if (token.IsCancellationRequested) return;
+
+                if (preloadData != null)
+                {
+                    file.PreloadData = preloadData;
+                    Dispatcher.UIThread.Post(() =>
                     {
-                        Avalonia.Threading.Dispatcher.UIThread.Post(() => 
+                        if (token.IsCancellationRequested) return;
+                        if (preloadData is Bitmap bmp)
                         {
-                            PreviewImage = fullBmp;
-                            IsLoadingFullData = false;
-                        });
-                    }
+                            PreviewImage = bmp;
+                            PreviewText = null;
+                            IsCurrentFileImage = file.IsImage || file.IsVideo;
+                            IsCurrentFileVideo = file.IsVideo;
+                        }
+                        else if (preloadData is string str)
+                        {
+                            PreviewText = str;
+                            PreviewImage = null;
+                            IsCurrentFileImage = false;
+                            IsCurrentFileVideo = false;
+                        }
+                    });
                 }
             }
-            else if (!file.IsImage && !file.IsVideo)
+
+            if (token.IsCancellationRequested) return;
+
+            // Priority 2: Current file full quality (start immediately, don't wait for neighbors)
+            var fullQualityTask = LoadFullQualityForCurrentAsync(file, token);
+
+            // Priority 3: Start neighbor preloading concurrently with full quality
+            var neighborTask = PreloadNeighborsAsync(currentIndex, token);
+
+            // Wait for the current file's full quality first
+            await fullQualityTask;
+            if (token.IsCancellationRequested) return;
+
+            // Wait for neighbors
+            await neighborTask;
+            if (token.IsCancellationRequested) return;
+
+            // Priority 4: Neighbor full qualities (lower priority, only after current is done)
+            await LoadNeighborFullQualitiesAsync(currentIndex, 5, token);
+
+            // Memory cleanup (efficient — only checks cached items, not all files)
+            EnforceMemoryLimits(currentIndex);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when navigation changes — silently ignore
+        }
+        catch (Exception)
+        {
+            // Don't crash the app on unexpected errors
+        }
+    }
+
+    /// <summary>
+    /// Loads full quality for the current file and posts to UI.
+    /// </summary>
+    private async Task LoadFullQualityForCurrentAsync(FileItem file, CancellationToken token)
+    {
+        if (file.IsImage && !_previewCache.ContainsKey(file.FullPath))
+        {
+            var fullBmp = await Task.Run(() =>
             {
+                try { return LoadImageWithExif(file.FullPath); }
+                catch (OperationCanceledException) { return null; }
+            }, token);
+
+            if (fullBmp != null && !token.IsCancellationRequested)
+            {
+                _previewCache.TryAdd(file.FullPath, fullBmp);
+                _cacheInsertionOrder.TryAdd(file.FullPath, Interlocked.Increment(ref _cacheInsertionCounter));
+
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (token.IsCancellationRequested) return;
+                    PreviewImage = fullBmp;
+                    IsLoadingFullData = false;
+                });
+            }
+            else if (!token.IsCancellationRequested)
+            {
+                // Image failed to load
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (token.IsCancellationRequested) return;
+                    IsLoadingFullData = false;
+                    if (PreviewImage == null)
+                    {
+                        PreviewText = $"Unable to load image: {file.Name}";
+                        IsCurrentFileImage = false;
+                    }
+                });
+            }
+        }
+        else if (!file.IsImage && !file.IsVideo)
+        {
+            // Text file — load full content
+            try
+            {
+                var fullText = await Task.Run(() =>
+                {
+                    var fileInfo = new FileInfo(file.FullPath);
+                    return fileInfo.Length > 1_048_576
+                        ? File.ReadAllText(file.FullPath)[..1_048_576] + "\n\n--- File truncated (>1 MB) ---"
+                        : File.ReadAllText(file.FullPath);
+                }, token);
+
+                if (!token.IsCancellationRequested)
+                {
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        if (token.IsCancellationRequested) return;
+                        PreviewText = fullText;
+                        IsLoadingFullData = false;
+                    });
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch
+            {
+                if (!token.IsCancellationRequested)
+                {
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        if (token.IsCancellationRequested) return;
+                        PreviewText = $"Unable to read file: {file.Name}";
+                        IsLoadingFullData = false;
+                    });
+                }
+            }
+        }
+        else if (file.IsVideo)
+        {
+            // Video — just mark as loaded once thumbnail is available
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (token.IsCancellationRequested) return;
+                IsLoadingFullData = false;
+            });
+        }
+        else
+        {
+            // Image already cached
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (token.IsCancellationRequested) return;
+                IsLoadingFullData = false;
+            });
+        }
+    }
+
+    /// <summary>
+    /// Preloads neighbor thumbnails in parallel with concurrency throttling.
+    /// Prioritizes forward direction (next files) slightly over backward.
+    /// </summary>
+    private async Task PreloadNeighborsAsync(int currentIndex, CancellationToken token)
+    {
+        const int range = 15;
+        int total = _flatFileList.Count;
+        
+        // Build a priority-ordered list: next files first (more likely to be viewed), then previous
+        var indicesToPreload = new List<int>();
+        for (int offset = 1; offset <= range; offset++)
+        {
+            int next = currentIndex + offset;
+            if (next < total) indicesToPreload.Add(next);
+            
+            int prev = currentIndex - offset;
+            if (prev >= 0) indicesToPreload.Add(prev);
+        }
+
+        // Process in parallel batches with throttled concurrency
+        var tasks = new List<Task>();
+        foreach (var idx in indicesToPreload)
+        {
+            if (token.IsCancellationRequested) return;
+            
+            var f = _flatFileList[idx];
+            if (f.PreloadData != null) continue; // Already loaded
+            if (IsUnsupportedImageFormat(f))
+            {
+                // Mark unsupported files with a text placeholder so we skip them fast
+                f.PreloadData = $"Unsupported format: {f.Metadata.Extension.ToUpperInvariant()}\n\n{f.Name}\n\n({f.Metadata.FormattedSize})";
+                continue;
+            }
+
+            tasks.Add(PreloadSingleFileAsync(f, token));
+            
+            // Limit in-flight tasks to prevent excessive memory pressure
+            if (tasks.Count >= 4)
+            {
+                await Task.WhenAny(tasks);
+                tasks.RemoveAll(t => t.IsCompleted);
+            }
+        }
+
+        if (tasks.Count > 0)
+            await Task.WhenAll(tasks);
+    }
+
+    /// <summary>
+    /// Preloads a single file's thumbnail with I/O throttling.
+    /// </summary>
+    private async Task PreloadSingleFileAsync(FileItem file, CancellationToken token)
+    {
+        await _ioSemaphore.WaitAsync(token);
+        try
+        {
+            if (token.IsCancellationRequested || file.PreloadData != null) return;
+            file.PreloadData = await Task.Run(() =>
+            {
+                try { return GeneratePreloadData(file); }
+                catch (OperationCanceledException) { return null; }
+                catch { return null; }
+            }, token);
+        }
+        finally
+        {
+            _ioSemaphore.Release();
+        }
+    }
+
+    /// <summary>
+    /// Loads full quality images for neighboring files.
+    /// </summary>
+    private async Task LoadNeighborFullQualitiesAsync(int currentIndex, int range, CancellationToken token)
+    {
+        int total = _flatFileList.Count;
+        
+        // Prioritize forward direction
+        for (int offset = 1; offset <= range; offset++)
+        {
+            if (token.IsCancellationRequested) return;
+
+            int next = currentIndex + offset;
+            if (next < total && _flatFileList[next].IsImage && !_previewCache.ContainsKey(_flatFileList[next].FullPath)
+                && !IsUnsupportedImageFormat(_flatFileList[next]))
+            {
+                var f = _flatFileList[next];
+                await _ioSemaphore.WaitAsync(token);
                 try
                 {
-                    var fileInfo = new System.IO.FileInfo(file.FullPath);
-                    var fullText = fileInfo.Length > 1_048_576 
-                        ? System.IO.File.ReadAllText(file.FullPath)[..1_048_576] + "\n\n--- File truncated (>1 MB) ---"
-                        : System.IO.File.ReadAllText(file.FullPath);
-
-                    if (!token.IsCancellationRequested)
+                    if (token.IsCancellationRequested) return;
+                    var bmp = await Task.Run(() =>
                     {
-                        Avalonia.Threading.Dispatcher.UIThread.Post(() => 
-                        {
-                            PreviewText = fullText;
-                            IsLoadingFullData = false;
-                        });
+                        try { return LoadImageWithExif(f.FullPath); }
+                        catch { return null; }
+                    }, token);
+                    if (bmp != null)
+                    {
+                        _previewCache.TryAdd(f.FullPath, bmp);
+                        _cacheInsertionOrder.TryAdd(f.FullPath, Interlocked.Increment(ref _cacheInsertionCounter));
                     }
                 }
-                catch 
+                finally
                 {
-                    if (!token.IsCancellationRequested)
-                    {
-                        Avalonia.Threading.Dispatcher.UIThread.Post(() => 
-                        {
-                            PreviewText = $"Unable to read file: {file.Name}";
-                            IsLoadingFullData = false;
-                        });
-                    }
+                    _ioSemaphore.Release();
                 }
             }
 
             if (token.IsCancellationRequested) return;
 
-            // Priority 4: ±5 Full Qualities
-            await GenerateFullQualitiesAsync(currentIndex, 5, token);
-
-            // Cleanup memory limits
-            EnforceMemoryLimits(currentIndex);
-
-        }, token);
+            int prev = currentIndex - offset;
+            if (prev >= 0 && _flatFileList[prev].IsImage && !_previewCache.ContainsKey(_flatFileList[prev].FullPath)
+                && !IsUnsupportedImageFormat(_flatFileList[prev]))
+            {
+                var f = _flatFileList[prev];
+                await _ioSemaphore.WaitAsync(token);
+                try
+                {
+                    if (token.IsCancellationRequested) return;
+                    var bmp = await Task.Run(() =>
+                    {
+                        try { return LoadImageWithExif(f.FullPath); }
+                        catch { return null; }
+                    }, token);
+                    if (bmp != null)
+                    {
+                        _previewCache.TryAdd(f.FullPath, bmp);
+                        _cacheInsertionOrder.TryAdd(f.FullPath, Interlocked.Increment(ref _cacheInsertionCounter));
+                    }
+                }
+                finally
+                {
+                    _ioSemaphore.Release();
+                }
+            }
+        }
     }
 
     private object? GeneratePreloadData(FileItem f)
@@ -422,7 +751,7 @@ public partial class MainPageViewModel : ViewModelBase
         {
             try
             {
-                using var reader = new System.IO.StreamReader(f.FullPath);
+                using var reader = new StreamReader(f.FullPath);
                 var buffer = new char[3000];
                 int read = reader.Read(buffer, 0, 3000);
                 return new string(buffer, 0, read) + (read == 3000 ? "\n..." : "");
@@ -431,93 +760,73 @@ public partial class MainPageViewModel : ViewModelBase
         }
     }
 
-    private async Task GeneratePreloadsAsync(int currentIndex, int range, System.Threading.CancellationToken token)
-    {
-        int total = _flatFileList.Count;
-        for (int offset = 1; offset <= range; offset++)
-        {
-            if (token.IsCancellationRequested) return;
-            int next = currentIndex + offset;
-            int prev = currentIndex - offset;
-
-            if (next < total && _flatFileList[next].PreloadData == null)
-            {
-                var f = _flatFileList[next];
-                f.PreloadData = await System.Threading.Tasks.Task.Run(() => GeneratePreloadData(f), token);
-            }
-            if (token.IsCancellationRequested) return;
-            
-            if (prev >= 0 && _flatFileList[prev].PreloadData == null)
-            {
-                var f = _flatFileList[prev];
-                f.PreloadData = await System.Threading.Tasks.Task.Run(() => GeneratePreloadData(f), token);
-            }
-        }
-    }
-
-    private async Task GenerateFullQualitiesAsync(int currentIndex, int range, System.Threading.CancellationToken token)
-    {
-        int total = _flatFileList.Count;
-        for (int offset = 1; offset <= range; offset++)
-        {
-            if (token.IsCancellationRequested) return;
-            int next = currentIndex + offset;
-            int prev = currentIndex - offset;
-
-            if (next < total && _flatFileList[next].IsImage && !_previewCache.ContainsKey(_flatFileList[next].FullPath))
-            {
-                var f = _flatFileList[next];
-                var bmp = await System.Threading.Tasks.Task.Run(() => LoadImageWithExif(f.FullPath), token);
-                if (bmp != null) _previewCache.TryAdd(f.FullPath, bmp);
-            }
-            if (token.IsCancellationRequested) return;
-            
-            if (prev >= 0 && _flatFileList[prev].IsImage && !_previewCache.ContainsKey(_flatFileList[prev].FullPath))
-            {
-                var f = _flatFileList[prev];
-                var bmp = await System.Threading.Tasks.Task.Run(() => LoadImageWithExif(f.FullPath), token);
-                if (bmp != null) _previewCache.TryAdd(f.FullPath, bmp);
-            }
-        }
-    }
-
+    /// <summary>
+    /// Efficient memory management that only iterates cached items, not all files.
+    /// Uses LRU-like eviction based on insertion order.
+    /// </summary>
     private void EnforceMemoryLimits(int currentIndex)
     {
-        // 1. Enforce Full Quality Limit (±10)
-        var pathsToKeepFull = new System.Collections.Generic.HashSet<string>();
-        int total = _flatFileList.Count;
-        
-        for (int i = System.Math.Max(0, currentIndex - 10); i <= System.Math.Min(total - 1, currentIndex + 10); i++)
+        // 1. Evict full quality cache entries beyond the limit
+        if (_previewCache.Count > MaxFullQualityCache)
         {
-            pathsToKeepFull.Add(_flatFileList[i].FullPath);
-        }
-
-        var keysToRemove = new System.Collections.Generic.List<string>();
-        foreach (var key in _previewCache.Keys)
-        {
-            if (!pathsToKeepFull.Contains(key)) keysToRemove.Add(key);
-        }
-
-        foreach (var key in keysToRemove)
-        {
-            if (_previewCache.TryRemove(key, out var oldBmp))
+            // Build the set of paths we want to keep (±10 from current)
+            var pathsToKeep = new HashSet<string>();
+            int total = _flatFileList.Count;
+            for (int i = Math.Max(0, currentIndex - 10); i <= Math.Min(total - 1, currentIndex + 10); i++)
             {
-                Avalonia.Threading.Dispatcher.UIThread.Post(() => oldBmp.Dispose());
+                pathsToKeep.Add(_flatFileList[i].FullPath);
             }
-        }
 
-        // 2. Enforce Preload Data Limit (±50)
-        for (int i = 0; i < total; i++)
-        {
-            if (System.Math.Abs(i - currentIndex) > 50)
+            // Find entries to evict: not in keep range, ordered by oldest insertion first
+            var evictCandidates = _cacheInsertionOrder
+                .Where(kvp => !pathsToKeep.Contains(kvp.Key))
+                .OrderBy(kvp => kvp.Value)
+                .Take(_previewCache.Count - MaxFullQualityCache + 5) // Evict a few extra to avoid thrashing
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            foreach (var key in evictCandidates)
             {
-                var file = _flatFileList[i];
-                if (file.PreloadData is Bitmap bmp)
+                if (_previewCache.TryRemove(key, out var oldBmp))
                 {
-                    Avalonia.Threading.Dispatcher.UIThread.Post(() => bmp.Dispose());
+                    _cacheInsertionOrder.TryRemove(key, out _);
+                    Dispatcher.UIThread.Post(() => oldBmp.Dispose());
                 }
-                file.PreloadData = null;
             }
+        }
+
+        // 2. Evict preload data far from current position
+        // Only check items outside ±MaxPreloadCache/2 window
+        int preloadRadius = MaxPreloadCache / 2;
+        int total2 = _flatFileList.Count;
+        
+        // Scan outward from the boundary instead of scanning all files
+        int lowerBound = Math.Max(0, currentIndex - preloadRadius);
+        int upperBound = Math.Min(total2 - 1, currentIndex + preloadRadius);
+
+        // Clear items below the lower bound (scan from start to lower bound)
+        // Only scan a limited range to avoid O(n) on every navigation
+        int scanStart = Math.Max(0, lowerBound - 100);
+        for (int i = scanStart; i < lowerBound; i++)
+        {
+            var file = _flatFileList[i];
+            if (file.PreloadData is Bitmap bmp)
+            {
+                Dispatcher.UIThread.Post(() => bmp.Dispose());
+            }
+            file.PreloadData = null;
+        }
+
+        // Clear items above the upper bound
+        int scanEnd = Math.Min(total2, upperBound + 100);
+        for (int i = upperBound + 1; i < scanEnd; i++)
+        {
+            var file = _flatFileList[i];
+            if (file.PreloadData is Bitmap bmp)
+            {
+                Dispatcher.UIThread.Post(() => bmp.Dispose());
+            }
+            file.PreloadData = null;
         }
     }
 
@@ -538,9 +847,9 @@ public partial class MainPageViewModel : ViewModelBase
         
         using var image = surface.Snapshot();
         using var data = image.Encode(SkiaSharp.SKEncodedImageFormat.Jpeg, 80);
-        using var ms = new System.IO.MemoryStream();
+        using var ms = new MemoryStream();
         data.SaveTo(ms);
-        ms.Seek(0, System.IO.SeekOrigin.Begin);
+        ms.Seek(0, SeekOrigin.Begin);
         return new Bitmap(ms);
     }
 
@@ -548,17 +857,17 @@ public partial class MainPageViewModel : ViewModelBase
     {
         try
         {
-            using var stream = System.IO.File.OpenRead(path);
+            using var stream = File.OpenRead(path);
             using var codec = SkiaSharp.SKCodec.Create(stream);
             if (codec is null)
             {
-                using var fallbackStream = System.IO.File.OpenRead(path);
+                using var fallbackStream = File.OpenRead(path);
                 return new Bitmap(fallbackStream);
             }
 
             if (codec.EncodedOrigin == SkiaSharp.SKEncodedOrigin.TopLeft || codec.EncodedOrigin == SkiaSharp.SKEncodedOrigin.Default)
             {
-                using var normalStream = System.IO.File.OpenRead(path);
+                using var normalStream = File.OpenRead(path);
                 return new Bitmap(normalStream);
             }
 
@@ -570,9 +879,9 @@ public partial class MainPageViewModel : ViewModelBase
 
             using var image = SkiaSharp.SKImage.FromBitmap(oriented);
             using var data = image.Encode(SkiaSharp.SKEncodedImageFormat.Jpeg, 100);
-            using var ms = new System.IO.MemoryStream();
+            using var ms = new MemoryStream();
             data.SaveTo(ms);
-            ms.Seek(0, System.IO.SeekOrigin.Begin);
+            ms.Seek(0, SeekOrigin.Begin);
             
             var bitmap = new Bitmap(ms);
 
@@ -585,7 +894,7 @@ public partial class MainPageViewModel : ViewModelBase
         {
             try
             {
-                using var fs = System.IO.File.OpenRead(path);
+                using var fs = File.OpenRead(path);
                 return new Bitmap(fs);
             }
             catch { return null; }
@@ -596,11 +905,11 @@ public partial class MainPageViewModel : ViewModelBase
     {
         try
         {
-            using var stream = System.IO.File.OpenRead(path);
+            using var stream = File.OpenRead(path);
             using var codec = SkiaSharp.SKCodec.Create(stream);
             if (codec is null)
             {
-                using var fallbackStream = System.IO.File.OpenRead(path);
+                using var fallbackStream = File.OpenRead(path);
                 return Bitmap.DecodeToWidth(fallbackStream, targetWidth);
             }
             
@@ -622,9 +931,9 @@ public partial class MainPageViewModel : ViewModelBase
 
             using var image = SkiaSharp.SKImage.FromBitmap(oriented);
             using var data = image.Encode(SkiaSharp.SKEncodedImageFormat.Jpeg, 80);
-            using var ms = new System.IO.MemoryStream();
+            using var ms = new MemoryStream();
             data.SaveTo(ms);
-            ms.Seek(0, System.IO.SeekOrigin.Begin);
+            ms.Seek(0, SeekOrigin.Begin);
             
             var bitmap = new Bitmap(ms);
 
@@ -637,7 +946,7 @@ public partial class MainPageViewModel : ViewModelBase
         {
             try
             {
-                using var fs = System.IO.File.OpenRead(path);
+                using var fs = File.OpenRead(path);
                 return Bitmap.DecodeToWidth(fs, targetWidth);
             }
             catch { return null; }
@@ -664,11 +973,11 @@ public partial class MainPageViewModel : ViewModelBase
                 currentFile.IsSorted = true;
 
                 // Fire and forget sorting so navigation is instant
-                _ = System.Threading.Tasks.Task.Run(async () => 
+                _ = Task.Run(async () => 
                 {
                     await _sortService.SortFileAsync(currentFile, outputFolders);
 
-                    Avalonia.Threading.Dispatcher.UIThread.Post(() => 
+                    Dispatcher.UIThread.Post(() => 
                     {
                         // Update the parent folder's sorted count.
                         if (currentFile.ParentFolder is InputFolderComponentViewModel inputFolder)
@@ -680,13 +989,105 @@ public partial class MainPageViewModel : ViewModelBase
             }
         }
 
-        // Navigate.
+        // Navigate immediately — never wait for anything
         var newIndex = CurrentFileIndex + direction;
         if (newIndex >= 0 && newIndex < TotalFileCount)
         {
             CurrentFileIndex = newIndex;
-            LoadCurrentFilePreview();
+            
+            // Cancel previous debounce
+            _debounceCts?.Cancel();
+            _debounceCts = new CancellationTokenSource();
+            var debounceToken = _debounceCts.Token;
+            
+            // Debounce: if the user is rapidly pressing next/prev, wait a moment
+            // before starting the heavy loading pipeline. But always show cached data instantly.
+            var file = CurrentFile;
+            if (file != null)
+            {
+                // Show cached data instantly (no delay)
+                ShowCachedPreviewInstant(file);
+                
+                // Debounce the full pipeline
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await Task.Delay(50, debounceToken);
+                        if (!debounceToken.IsCancellationRequested)
+                        {
+                            Dispatcher.UIThread.Post(() =>
+                            {
+                                if (!debounceToken.IsCancellationRequested)
+                                    LoadCurrentFilePreview();
+                            });
+                        }
+                    }
+                    catch (OperationCanceledException) { }
+                }, debounceToken);
+            }
+            else
+            {
+                LoadCurrentFilePreview();
+            }
         }
+    }
+
+    /// <summary>
+    /// Shows whatever we already have cached for a file — zero I/O, instant UI update.
+    /// Used during rapid navigation to give immediate visual feedback.
+    /// </summary>
+    private void ShowCachedPreviewInstant(FileItem file)
+    {
+        // Handle unsupported formats instantly
+        if (IsUnsupportedImageFormat(file))
+        {
+            PreviewImage = null;
+            PreviewText = $"Unsupported format: {file.Metadata.Extension.ToUpperInvariant()}\n\n{file.Name}\n\n({file.Metadata.FormattedSize})";
+            IsCurrentFileImage = false;
+            IsCurrentFileVideo = false;
+            IsLoadingFullData = false;
+            return;
+        }
+
+        // Best case: full quality in cache
+        if (file.IsImage && _previewCache.TryGetValue(file.FullPath, out var cachedFull))
+        {
+            PreviewImage = cachedFull;
+            PreviewText = null;
+            IsCurrentFileImage = true;
+            IsCurrentFileVideo = false;
+            IsLoadingFullData = false;
+            return;
+        }
+
+        // Good case: preloaded thumbnail
+        if (file.PreloadData is Bitmap preloadBmp)
+        {
+            PreviewImage = preloadBmp;
+            PreviewText = null;
+            IsCurrentFileImage = file.IsImage || file.IsVideo;
+            IsCurrentFileVideo = file.IsVideo;
+            IsLoadingFullData = file.IsImage;
+            return;
+        }
+
+        if (file.PreloadData is string preloadStr)
+        {
+            PreviewText = preloadStr;
+            PreviewImage = null;
+            IsCurrentFileImage = false;
+            IsCurrentFileVideo = false;
+            IsLoadingFullData = !file.IsImage && !file.IsVideo;
+            return;
+        }
+
+        // No cached data — show blank with loading indicator
+        PreviewImage = null;
+        PreviewText = null;
+        IsCurrentFileImage = file.IsImage || file.IsVideo;
+        IsCurrentFileVideo = file.IsVideo;
+        IsLoadingFullData = true;
     }
 
     /// <summary>
