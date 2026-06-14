@@ -9,6 +9,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using LibVLCSharp.Shared;
 
 namespace AfterSort.ViewModels.Pages;
 
@@ -18,6 +19,11 @@ public partial class MainPageViewModel : ViewModelBase
 
     private readonly IStorageService _storageService;
     private readonly ISortService _sortService;
+    private readonly IVideoService _videoService;
+
+    // === LibVLCSharp video playback ===
+    private LibVLC? _libVLC;
+    private LibVLCSharp.Shared.MediaPlayer? _mediaPlayer;
 
     /// <summary>
     /// Flattened list of all files across all input folders (or a single folder if selected).
@@ -124,6 +130,18 @@ public partial class MainPageViewModel : ViewModelBase
     public partial Bitmap? PreviewImage { get; set; }
 
     /// <summary>
+    /// Preview image for the previous file in the queue.
+    /// </summary>
+    [ObservableProperty]
+    public partial Bitmap? PreviousPreviewImage { get; set; }
+
+    /// <summary>
+    /// Preview image for the next file in the queue.
+    /// </summary>
+    [ObservableProperty]
+    public partial Bitmap? NextPreviewImage { get; set; }
+
+    /// <summary>
     /// Text content for non-image file preview. Null when the current file is an image.
     /// </summary>
     [ObservableProperty]
@@ -133,13 +151,135 @@ public partial class MainPageViewModel : ViewModelBase
     /// Whether the current file is an image (controls which preview panel is shown).
     /// </summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsShowingImagePreview))]
+    [NotifyPropertyChangedFor(nameof(IsShowingVideoThumbnail))]
+    [NotifyPropertyChangedFor(nameof(IsShowingTextPreview))]
     public partial bool IsCurrentFileImage { get; set; }
 
     /// <summary>
     /// Whether the current file is a video (controls video player UI visibility).
     /// </summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsShowingImagePreview))]
+    [NotifyPropertyChangedFor(nameof(IsShowingVideoThumbnail))]
+    [NotifyPropertyChangedFor(nameof(IsShowingTextPreview))]
     public partial bool IsCurrentFileVideo { get; set; }
+
+    /// <summary>
+    /// Whether the video is currently playing.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsVideoPlaying { get; set; }
+
+    /// <summary>
+    /// Whether the video player is active (playing or paused).
+    /// Keeps the video view visible when paused.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsShowingImagePreview))]
+    [NotifyPropertyChangedFor(nameof(IsShowingVideoThumbnail))]
+    [NotifyPropertyChangedFor(nameof(IsShowingTextPreview))]
+    public partial bool IsVideoActive { get; set; }
+
+    /// <summary>
+    /// The LibVLCSharp MediaPlayer instance for video playback.
+    /// Bound to the VideoView control in XAML.
+    /// </summary>
+    [ObservableProperty]
+    public partial LibVLCSharp.Shared.MediaPlayer? VideoPlayer { get; set; }
+
+    /// <summary>
+    /// Current video playback position (0.0 to 1.0).
+    /// When the user drags the slider, this triggers a seek on the media player.
+    /// </summary>
+    [ObservableProperty]
+    public partial float VideoPosition { get; set; }
+
+    /// <summary>
+    /// Guard flag to prevent feedback loop when updating VideoPosition from the player.
+    /// </summary>
+    private bool _isUpdatingPositionFromPlayer;
+
+    partial void OnVideoPositionChanged(float value)
+    {
+        if (_isUpdatingPositionFromPlayer) return;
+
+        if (_mediaPlayer is { IsPlaying: true } or { Media: not null })
+        {
+            _mediaPlayer.Position = value;
+        }
+        else if (IsCurrentFileVideo && CurrentFile != null)
+        {
+            StartPlayerPausedAt(value);
+        }
+    }
+
+    private void StartPlayerPausedAt(float position)
+    {
+        var file = CurrentFile;
+        if (file == null || !file.IsVideo) return;
+
+        EnsureLibVLCInitialized();
+        if (_libVLC == null) return;
+
+        if (_mediaPlayer != null) return; // Already starting
+
+        _mediaPlayer = new LibVLCSharp.Shared.MediaPlayer(_libVLC)
+        {
+            EnableMouseInput = false,
+            EnableKeyInput = false
+        };
+        _mediaPlayer.PositionChanged += OnPlayerPositionChanged;
+        _mediaPlayer.EndReached += OnVideoEndReached;
+        VideoPlayer = _mediaPlayer;
+
+        var media = new LibVLCSharp.Shared.Media(_libVLC, new Uri(file.FullPath));
+        _mediaPlayer.Play(media);
+        
+        IsVideoPlaying = false;
+        IsVideoActive = true;
+
+        // Wait for playback to actually begin, then pause and seek to the slider position
+        System.Threading.Tasks.Task.Run(async () =>
+        {
+            // SpinWait until IsPlaying is true, max 2 seconds
+            int waits = 0;
+            while (_mediaPlayer != null && !_mediaPlayer.IsPlaying && waits < 40)
+            {
+                await System.Threading.Tasks.Task.Delay(50);
+                waits++;
+            }
+
+            if (_mediaPlayer != null && _mediaPlayer.IsPlaying)
+            {
+                _mediaPlayer.Pause();
+                _mediaPlayer.Position = position;
+            }
+        });
+    }
+
+    /// <summary>
+    /// Formatted current time of the video.
+    /// </summary>
+    [ObservableProperty]
+    public partial string VideoTimeText { get; set; } = "0:00 / 0:00";
+
+    // === Computed visibility properties for the XAML ===
+
+    /// <summary>
+    /// True when showing a non-video image preview (thumbnail or full quality).
+    /// </summary>
+    public bool IsShowingImagePreview => IsCurrentFileImage && !IsCurrentFileVideo && !IsVideoActive;
+
+    /// <summary>
+    /// True when showing a video thumbnail with a play overlay (not yet playing).
+    /// </summary>
+    public bool IsShowingVideoThumbnail => IsCurrentFileVideo && !IsVideoActive;
+
+    /// <summary>
+    /// True when showing text preview (non-image, non-video files).
+    /// </summary>
+    public bool IsShowingTextPreview => !IsCurrentFileImage && !IsCurrentFileVideo && !IsVideoActive;
 
     /// <summary>
     /// Whether the full high-res data is currently loading.
@@ -151,10 +291,11 @@ public partial class MainPageViewModel : ViewModelBase
 
     #region Constructors
 
-    public MainPageViewModel(IStorageService storageService, ISortService sortService)
+    public MainPageViewModel(IStorageService storageService, ISortService sortService, IVideoService videoService)
     {
         _storageService = storageService;
         _sortService = sortService;
+        _videoService = videoService;
         InputFolders = new FolderSelectComponentViewModel { Title = "Input Folders" };
         DestFolders = new FolderSelectComponentViewModel { Title = "Dest Folders" };
 
@@ -345,6 +486,9 @@ public partial class MainPageViewModel : ViewModelBase
         var file = CurrentFile;
         int currentIndex = CurrentFileIndex;
 
+        // Stop any active video playback when navigating
+        StopVideoPlayback();
+
         if (file is null)
         {
             IsCurrentFileImage = false;
@@ -421,6 +565,27 @@ public partial class MainPageViewModel : ViewModelBase
 
         // === PHASE 2: Background pipeline (ordered by priority) ===
         _ = RunBackgroundPipelineAsync(file, currentIndex, token);
+        
+        UpdateNeighborPreviews();
+    }
+
+    private void UpdateNeighborPreviews()
+    {
+        var currentIndex = CurrentFileIndex;
+        
+        Bitmap? prevBmp = null;
+        if (currentIndex > 0 && currentIndex - 1 < _flatFileList.Count)
+        {
+            prevBmp = _flatFileList[currentIndex - 1].PreloadData as Bitmap;
+        }
+        PreviousPreviewImage = prevBmp;
+
+        Bitmap? nextBmp = null;
+        if (currentIndex + 1 < _flatFileList.Count)
+        {
+            nextBmp = _flatFileList[currentIndex + 1].PreloadData as Bitmap;
+        }
+        NextPreviewImage = nextBmp;
     }
 
     /// <summary>
@@ -662,6 +827,17 @@ public partial class MainPageViewModel : ViewModelBase
                 catch (OperationCanceledException) { return null; }
                 catch { return null; }
             }, token);
+
+            if (file.PreloadData != null)
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (!token.IsCancellationRequested)
+                    {
+                        UpdateNeighborPreviews();
+                    }
+                });
+            }
         }
         finally
         {
@@ -745,7 +921,8 @@ public partial class MainPageViewModel : ViewModelBase
         }
         else if (f.IsVideo)
         {
-            return GenerateVideoThumbnail();
+            // Extract a real frame from the video at ~5 seconds
+            return _videoService.ExtractThumbnail(f.FullPath, TimeSpan.FromSeconds(5), 400);
         }
         else
         {
@@ -830,27 +1007,171 @@ public partial class MainPageViewModel : ViewModelBase
         }
     }
 
-    private Bitmap GenerateVideoThumbnail()
+    /// <summary>
+    /// Ensures LibVLC is initialized for video playback.
+    /// </summary>
+    private void EnsureLibVLCInitialized()
     {
-        var info = new SkiaSharp.SKImageInfo(400, 300);
-        using var surface = SkiaSharp.SKSurface.Create(info);
-        var canvas = surface.Canvas;
-        canvas.Clear(new SkiaSharp.SKColor(20, 20, 20));
-        
-        using var paint = new SkiaSharp.SKPaint { Color = SkiaSharp.SKColors.White, IsAntialias = true };
-        var pathObj = new SkiaSharp.SKPath();
-        pathObj.MoveTo(160, 100);
-        pathObj.LineTo(160, 200);
-        pathObj.LineTo(260, 150);
-        pathObj.Close();
-        canvas.DrawPath(pathObj, paint);
-        
-        using var image = surface.Snapshot();
-        using var data = image.Encode(SkiaSharp.SKEncodedImageFormat.Jpeg, 80);
-        using var ms = new MemoryStream();
-        data.SaveTo(ms);
-        ms.Seek(0, SeekOrigin.Begin);
-        return new Bitmap(ms);
+        if (_libVLC != null) return;
+
+        try
+        {
+            Core.Initialize();
+            _libVLC = new LibVLC("--no-video-title-show");
+        }
+        catch
+        {
+            // LibVLC not available — playback won't work but app won't crash
+        }
+    }
+
+    /// <summary>
+    /// Stops any active video playback and cleans up the media player.
+    /// </summary>
+    private void StopVideoPlayback()
+    {
+        if (_mediaPlayer != null)
+        {
+            _mediaPlayer.PositionChanged -= OnPlayerPositionChanged;
+            _mediaPlayer.EndReached -= OnVideoEndReached;
+
+            if (_mediaPlayer.IsPlaying)
+                _mediaPlayer.Stop();
+
+            var oldPlayer = _mediaPlayer;
+            var media = _mediaPlayer.Media;
+            
+            _mediaPlayer = null;
+            VideoPlayer = null; // Detach XAML first
+
+            // Dispatch dispose to ensure XAML has fully detached before destroying native objects
+            Dispatcher.UIThread.Post(() => 
+            {
+                oldPlayer.Dispose();
+                media?.Dispose();
+            }, Avalonia.Threading.DispatcherPriority.Background);
+        }
+
+        IsVideoPlaying = false;
+        IsVideoActive = false;
+        _isUpdatingPositionFromPlayer = true;
+        VideoPosition = 0;
+        _isUpdatingPositionFromPlayer = false;
+        VideoTimeText = "0:00 / 0:00";
+    }
+
+    /// <summary>
+    /// Toggle play/pause for the current video file.
+    /// </summary>
+    [RelayCommand]
+    private void ToggleVideoPlayback()
+    {
+        var file = CurrentFile;
+        if (file == null || !file.IsVideo) return;
+
+        EnsureLibVLCInitialized();
+        if (_libVLC == null) return;
+
+        // If currently playing → pause
+        if (_mediaPlayer != null && _mediaPlayer.IsPlaying)
+        {
+            _mediaPlayer.Pause();
+            IsVideoPlaying = false;
+            // Note: IsVideoActive remains true to keep the view visible
+            return;
+        }
+
+        // If we have a media player with media loaded (paused state) → resume
+        if (_mediaPlayer != null && _mediaPlayer.Media != null)
+        {
+            _mediaPlayer.Play();
+            IsVideoPlaying = true;
+            IsVideoActive = true;
+            return;
+        }
+
+        // Dispose previous player if any
+        if (_mediaPlayer != null)
+        {
+            _mediaPlayer.PositionChanged -= OnPlayerPositionChanged;
+            _mediaPlayer.EndReached -= OnVideoEndReached;
+            
+            var oldPlayer = _mediaPlayer;
+            _mediaPlayer = null;
+            VideoPlayer = null; // Detach XAML
+            
+            Dispatcher.UIThread.Post(() => 
+            {
+                oldPlayer.Dispose();
+            }, Avalonia.Threading.DispatcherPriority.Background);
+        }
+
+        // Create new media player for this file
+        _mediaPlayer = new LibVLCSharp.Shared.MediaPlayer(_libVLC)
+        {
+            EnableMouseInput = false,
+            EnableKeyInput = false
+        };
+        _mediaPlayer.PositionChanged += OnPlayerPositionChanged;
+        _mediaPlayer.EndReached += OnVideoEndReached;
+
+        VideoPlayer = _mediaPlayer;
+
+        // Don't use `using` — Media needs to stay alive for seeking/resume to work
+        var media = new Media(_libVLC, new Uri(file.FullPath));
+        _mediaPlayer.Play(media);
+        IsVideoPlaying = true;
+        IsVideoActive = true;
+    }
+
+    private void OnPlayerPositionChanged(object? sender, MediaPlayerPositionChangedEventArgs e)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            _isUpdatingPositionFromPlayer = true;
+            VideoPosition = e.Position;
+            _isUpdatingPositionFromPlayer = false;
+            if (_mediaPlayer != null)
+            {
+                var current = TimeSpan.FromMilliseconds(_mediaPlayer.Time);
+                var total = TimeSpan.FromMilliseconds(_mediaPlayer.Length);
+                VideoTimeText = $"{FormatTime(current)} / {FormatTime(total)}";
+            }
+        });
+    }
+
+    private void OnVideoEndReached(object? sender, EventArgs e)
+    {
+        // LibVLCSharp requires media player operations from EndReached to be dispatched
+        // to avoid deadlocking VLC's event thread.
+        Dispatcher.UIThread.Post(() =>
+        {
+            IsVideoPlaying = false;
+            IsVideoActive = false;
+            _isUpdatingPositionFromPlayer = true;
+            VideoPosition = 0;
+            _isUpdatingPositionFromPlayer = false;
+            VideoTimeText = "0:00 / 0:00";
+
+            // Show the thumbnail again
+            var file = CurrentFile;
+            if (file != null)
+            {
+                IsCurrentFileImage = true;
+                IsCurrentFileVideo = true;
+                if (file.PreloadData is Bitmap preloadBmp)
+                {
+                    PreviewImage = preloadBmp;
+                }
+            }
+        });
+    }
+
+    private static string FormatTime(TimeSpan t)
+    {
+        return t.Hours > 0
+            ? $"{t.Hours}:{t.Minutes:D2}:{t.Seconds:D2}"
+            : $"{t.Minutes}:{t.Seconds:D2}";
     }
 
     private Bitmap? LoadImageWithExif(string path)
@@ -1039,6 +1360,9 @@ public partial class MainPageViewModel : ViewModelBase
     /// </summary>
     private void ShowCachedPreviewInstant(FileItem file)
     {
+        // Stop any video that might be playing from the previous file
+        StopVideoPlayback();
+
         // Handle unsupported formats instantly
         if (IsUnsupportedImageFormat(file))
         {

@@ -5,6 +5,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="using:AfterSort.ViewModels.Pages"
              xmlns:models="using:AfterSort.Models"
+             xmlns:vlc="using:LibVLCSharp.Avalonia"
              mc:Ignorable="d"
              d:DesignWidth="1000" d:DesignHeight="600"
              x:Class="AfterSort.Views.Pages.MainPageView"
@@ -107,39 +108,134 @@
             <!-- Main Content Area — File Preview -->
             <Border Grid.Row="1" Background="{DynamicResource AppBackground}">
                 <Panel>
-                    <!-- Empty state when no files -->
-                    <StackPanel HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                IsVisible="{Binding !HasCurrentFile}">
-                        <PathIcon Data="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z"
-                                  Foreground="{DynamicResource Background4}"
-                                  Width="48" Height="48"/>
-                        <TextBlock Text="Add input folders to begin sorting"
-                                   Foreground="{DynamicResource PrimaryText}"
-                                   Opacity="0.5"
-                                   FontSize="14"
-                                   HorizontalAlignment="Center"
-                                   Margin="0,12,0,0"/>
-                    </StackPanel>
+                    <Grid ColumnDefinitions="15*, 70*, 15*" Margin="20" VerticalAlignment="Bottom">
+                        
+                        <!-- Left: Previous File Preview (15%) -->
+                        <Panel Grid.Column="0" Margin="0,0,10,0">
+                            <Image Source="{Binding PreviousPreviewImage}" 
+                                   Stretch="Uniform" 
+                                   Opacity="0.4"
+                                   VerticalAlignment="Bottom"/>
+                        </Panel>
 
-                    <!-- Image preview -->
-                    <Image Source="{Binding PreviewImage}"
-                           Stretch="Uniform"
-                           Margin="20"
-                           IsVisible="{Binding IsCurrentFileImage}"/>
+                        <!-- Center: Main Preview (70%) -->
+                        <Panel Grid.Column="1">
+                            <!-- Empty state when no files -->
+                            <StackPanel HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        IsVisible="{Binding !HasCurrentFile}">
+                                <PathIcon Data="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z"
+                                          Foreground="{DynamicResource Background4}"
+                                          Width="48" Height="48"/>
+                                <TextBlock Text="Add input folders to begin sorting"
+                                           Foreground="{DynamicResource PrimaryText}"
+                                           Opacity="0.5"
+                                           FontSize="14"
+                                           HorizontalAlignment="Center"
+                                           Margin="0,12,0,0"/>
+                            </StackPanel>
 
-                    <!-- Text preview (non-image files) -->
-                    <ScrollViewer HorizontalScrollBarVisibility="Auto"
-                                  VerticalScrollBarVisibility="Auto"
-                                  Margin="10"
-                                  IsVisible="{Binding !IsCurrentFileImage}">
-                        <SelectableTextBlock Text="{Binding PreviewText}"
-                                  Foreground="{DynamicResource PrimaryText}"
-                                  FontFamily="Consolas, Courier New, monospace"
-                                  FontSize="12"
-                                  Padding="10"
-                                  IsVisible="{Binding HasCurrentFile}"/>
-                    </ScrollViewer>
+                            <!-- Image preview (non-video images only) -->
+                            <Image Source="{Binding PreviewImage}"
+                                   Stretch="Uniform"
+                                   IsVisible="{Binding IsShowingImagePreview}"/>
+
+                            <!-- Video player area (shown only for video files) -->
+                            <Panel IsVisible="{Binding IsCurrentFileVideo}">
+                                <Viewbox Stretch="Uniform" x:Name="VideoViewbox">
+                                    <Panel>
+                                        <!-- The thumbnail provides the exact native aspect ratio size -->
+                                        <Image Source="{Binding PreviewImage}" 
+                                               Stretch="None" />
+                                        
+                                        <!-- LibVLCSharp Video Player overlays the exact thumbnail bounds -->
+                                        <vlc:VideoView MediaPlayer="{Binding VideoPlayer}"
+                                                       IsVisible="{Binding IsVideoActive}"
+                                                       HorizontalAlignment="Stretch"
+                                                       VerticalAlignment="Stretch"/>
+                                    </Panel>
+                                </Viewbox>
+
+                                <!-- Clickable overlay exactly over the video area -->
+                                <Popup IsOpen="{Binding IsVideoActive}"
+                                       PlacementTarget="{Binding #VideoViewbox}"
+                                       Placement="Center"
+                                       IsLightDismissEnabled="False"
+                                       Width="{Binding #VideoViewbox.Bounds.Width}"
+                                       Height="{Binding #VideoViewbox.Bounds.Height}">
+                                    <Button HorizontalAlignment="Stretch"
+                                            VerticalAlignment="Stretch"
+                                            Command="{Binding ToggleVideoPlaybackCommand}"
+                                            Background="Transparent"
+                                            BorderThickness="0"
+                                            Padding="0"
+                                            Cursor="Hand">
+                                        <Panel>
+                                            <!-- Always visible invisible rectangle forces Avalonia to keep this hit-testable -->
+                                            <Rectangle Fill="#01000000" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+                                            
+                                            <Panel HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"
+                                                   IsVisible="{Binding !IsVideoPlaying}">
+                                                <!-- Scaled play button overlay inside the Viewbox -->
+                                                <Border Background="#80000000"
+                                                        CornerRadius="100"
+                                                        Width="160" Height="160"/>
+                                                <PathIcon Data="M8 5v14l11-7z" 
+                                                          Width="60" Height="60" 
+                                                          Foreground="White"
+                                                          Margin="12,0,0,0"/>
+                                            </Panel>
+                                        </Panel>
+                                    </Button>
+                                </Popup>
+                                
+                                <!-- Original fallback button for when video is NOT active (shows the thumbnail play button) -->
+                                <Button HorizontalAlignment="Stretch"
+                                        VerticalAlignment="Stretch"
+                                        Command="{Binding ToggleVideoPlaybackCommand}"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        Padding="0"
+                                        Cursor="Hand"
+                                        IsVisible="{Binding !IsVideoActive}">
+                                    <Panel>
+                                        <Rectangle Fill="#01000000" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+                                        <Panel HorizontalAlignment="Center"
+                                               VerticalAlignment="Center">
+                                            <Border Background="#80000000"
+                                                    CornerRadius="100"
+                                                    Width="160" Height="160"/>
+                                            <PathIcon Data="M8 5v14l11-7z" 
+                                                      Width="60" Height="60" 
+                                                      Foreground="White"
+                                                      Margin="12,0,0,0"/>
+                                        </Panel>
+                                    </Panel>
+                                </Button>
+                            </Panel>
+
+                            <!-- Text preview (non-image, non-video files) -->
+                            <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                          VerticalScrollBarVisibility="Auto"
+                                          IsVisible="{Binding IsShowingTextPreview}"
+                                          MaxHeight="800">
+                                <SelectableTextBlock Text="{Binding PreviewText}"
+                                                     Foreground="{DynamicResource PrimaryText}"
+                                                     FontFamily="Consolas, Courier New, monospace"
+                                                     FontSize="12"
+                                                     Padding="10"/>
+                            </ScrollViewer>
+                        </Panel>
+
+                        <!-- Right: Next File Preview (15%) -->
+                        <Panel Grid.Column="2" Margin="10,0,0,0">
+                            <Image Source="{Binding NextPreviewImage}" 
+                                   Stretch="Uniform" 
+                                   Opacity="0.4"
+                                   VerticalAlignment="Bottom"/>
+                        </Panel>
+                    </Grid>
 
                     <!-- Loading Indicator Overlay -->
                     <Border Background="{DynamicResource Background3}"
@@ -163,11 +259,37 @@
                     IsVisible="{Binding IsCurrentFileVideo}"
                     Padding="15,8">
                 <Grid ColumnDefinitions="Auto, *, Auto">
-                    <Button Grid.Column="0" CornerRadius="16" Width="32" Height="32" Background="{DynamicResource Background4}" Padding="9">
-                        <PathIcon Data="M8 5v14l11-7z" Width="14" Height="14" Foreground="{DynamicResource PrimaryText}"/>
+                    <!-- Play/Pause button -->
+                    <Button Grid.Column="0" 
+                            CornerRadius="16" Width="32" Height="32" 
+                            Background="{DynamicResource Background4}" 
+                            Padding="9"
+                            Command="{Binding ToggleVideoPlaybackCommand}">
+                        <Panel>
+                            <!-- Play icon (shown when not playing) -->
+                            <PathIcon Data="M8 5v14l11-7z" 
+                                      Width="14" Height="14" 
+                                      Foreground="{DynamicResource PrimaryText}"
+                                      IsVisible="{Binding !IsVideoPlaying}"/>
+                            <!-- Pause icon (shown when playing) -->
+                            <PathIcon Data="M6 19h4V5H6v14zm8-14v14h4V5h-4z" 
+                                      Width="14" Height="14" 
+                                      Foreground="{DynamicResource PrimaryText}"
+                                      IsVisible="{Binding IsVideoPlaying}"/>
+                        </Panel>
                     </Button>
-                    <Slider Grid.Column="1" Margin="20,0" VerticalAlignment="Center"/>
-                    <TextBlock Grid.Column="2" Text="0:00 / 0:00" VerticalAlignment="Center" Foreground="{DynamicResource PrimaryText}" FontSize="12" Opacity="0.8"/>
+                    <Slider Grid.Column="1" 
+                            Margin="20,0" 
+                            VerticalAlignment="Center"
+                            Minimum="0" Maximum="1"
+                            Value="{Binding VideoPosition}"
+                            x:Name="VideoScrubber"/>
+                    <TextBlock Grid.Column="2" 
+                               Text="{Binding VideoTimeText}" 
+                               VerticalAlignment="Center" 
+                               Foreground="{DynamicResource PrimaryText}" 
+                               FontSize="12" 
+                               Opacity="0.8"/>
                 </Grid>
             </Border>
 
