@@ -10,8 +10,6 @@ namespace AfterSort.Models;
 /// </summary>
 public partial class FileItem : ObservableObject
 {
-    #region Properties
-
     /// <summary>
     /// The file name including extension (e.g. "photo.jpg").
     /// </summary>
@@ -64,11 +62,12 @@ public partial class FileItem : ObservableObject
     public partial bool IsSorted { get; set; }
 
     /// <summary>
-    /// Whether this file is a supported image type for preview.
+    /// Whether this file is a supported image type for preview (including HEIC/HEIF and SVG).
     /// </summary>
     public bool IsImage => Metadata.Extension.ToLowerInvariant() switch
     {
-        ".png" or ".jpg" or ".jpeg" or ".bmp" or ".gif" or ".ico" or ".webp" => true,
+        ".png" or ".jpg" or ".jpeg" or ".bmp" or ".gif" or ".ico" or ".webp"
+            or ".heic" or ".heif" or ".svg" => true,
         _ => false,
     };
 
@@ -81,10 +80,6 @@ public partial class FileItem : ObservableObject
         _ => false,
     };
 
-    #endregion
-
-    #region Methods
-
     /// <summary>
     /// Creates a <see cref="FileItem"/> from a <see cref="FileInfo"/> and a parent folder.
     /// File data is not loaded (left null).
@@ -96,10 +91,7 @@ public partial class FileItem : ObservableObject
             Name = fileInfo.Name,
             FullPath = fileInfo.FullName,
             ParentFolder = parentFolder,
-            Data = null,
             Metadata = FileMetadata.FromFileInfo(fileInfo),
         };
     }
-
-    #endregion
 }

@@ -6,152 +6,96 @@ using SkiaSharp;
 namespace AfterSort.Services;
 
 /// <summary>
-/// Video service implementation using LibVLC for thumbnail extraction.
-/// Uses VLC's video callbacks to capture a frame at ~5 seconds headlessly (no window).
+/// LibVLC-backed video service. Lazily initialises a single shared <see cref="LibVLC"/> used for
+/// both headless thumbnail capture (via video callbacks) and on-screen playback.
 /// </summary>
 public class VideoService : IVideoService
 {
-    private LibVLC? _libVLC;
+    private static readonly object InitLock = new();
     private static bool _coreInitialized;
-    private static readonly object _initLock = new();
+
+    private LibVLC? _libVLC;
+
+    private static readonly HashSet<string> VideoExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".mp4", ".mkv", ".avi", ".mov", ".webm", ".wmv", ".flv",
+    };
+
+    public bool IsSupported(string extension) => VideoExtensions.Contains(extension);
+
+    public MediaPlayer? CreatePlayer()
+    {
+        var libVLC = EnsureInitialized();
+        return libVLC is null
+            ? null
+            : new MediaPlayer(libVLC) { EnableMouseInput = false, EnableKeyInput = false };
+    }
+
+    public Media? CreateMedia(string path)
+    {
+        var libVLC = EnsureInitialized();
+        return libVLC is null ? null : new Media(libVLC, new Uri(path));
+    }
 
     /// <summary>
-    /// Ensures LibVLC native libraries are loaded and a LibVLC instance is ready.
+    /// Loads the native libraries and returns the shared instance, or null if VLC is unavailable.
     /// </summary>
-    private void EnsureInitialized()
+    private LibVLC? EnsureInitialized()
     {
-        if (_libVLC != null) return;
-        lock (_initLock)
+        if (_libVLC != null)
+            return _libVLC;
+
+        lock (InitLock)
         {
-            if (!_coreInitialized)
+            if (_libVLC != null)
+                return _libVLC;
+
+            try
             {
-                Core.Initialize();
-                _coreInitialized = true;
+                if (!_coreInitialized)
+                {
+                    Core.Initialize();
+                    _coreInitialized = true;
+                }
+
+                _libVLC = new LibVLC("--no-video-title-show", "--no-osd", "--no-snapshot-preview");
             }
-            _libVLC ??= new LibVLC("--no-audio", "--no-sub-autodetect-file", "--no-stats", "--no-osd",
-                                    "--no-snapshot-preview", "--no-video-title-show");
+            catch
+            {
+                // VLC native libs missing — playback/thumbnails degrade gracefully to placeholders.
+            }
+
+            return _libVLC;
         }
     }
 
-    /// <inheritdoc/>
     public Bitmap? ExtractThumbnail(string videoPath, TimeSpan offset, int targetWidth = 400)
     {
         try
         {
-            EnsureInitialized();
-            if (_libVLC == null)
+            var libVLC = EnsureInitialized();
+            if (libVLC is null)
                 return GeneratePlaceholderThumbnail(targetWidth);
 
-            using var media = new Media(_libVLC, videoPath, FromType.FromPath);
-
-            // Parse media to discover video track info (dimensions, duration)
+            using var media = new Media(libVLC, videoPath, FromType.FromPath);
+            media.AddOption(":no-audio"); // Headless capture — no audio device needed.
             media.Parse(MediaParseOptions.ParseLocal, timeout: 5000).GetAwaiter().GetResult();
 
-            // Find video track to get dimensions
-            uint origWidth = 0, origHeight = 0;
-            foreach (var track in media.Tracks)
-            {
-                if (track.TrackType == TrackType.Video)
-                {
-                    origWidth = track.Data.Video.Width;
-                    origHeight = track.Data.Video.Height;
-                    break;
-                }
-            }
-            if (origWidth == 0 || origHeight == 0)
+            if (!TryGetVideoSize(media, out var origWidth, out var origHeight))
                 return GeneratePlaceholderThumbnail(targetWidth);
 
-            // Calculate thumbnail dimensions (maintain aspect ratio, ensure even numbers)
-            float scale = Math.Min((float)targetWidth / origWidth, 1f);
-            uint thumbW = ((uint)(origWidth * scale)) & ~1u;
-            uint thumbH = ((uint)(origHeight * scale)) & ~1u;
-            if (thumbW < 2) thumbW = 2;
-            if (thumbH < 2) thumbH = 2;
-            uint pitch = thumbW * 4; // RV32 = 4 bytes/pixel (BGRA)
-            int bufferSize = (int)(pitch * thumbH);
+            // Maintain aspect ratio; RV32 needs even dimensions.
+            var scale = Math.Min((float)targetWidth / origWidth, 1f);
+            var thumbW = Math.Max(2u, ((uint)(origWidth * scale)) & ~1u);
+            var thumbH = Math.Max(2u, ((uint)(origHeight * scale)) & ~1u);
+            var pitch = thumbW * 4; // RV32 = 4 bytes/pixel (BGRA)
+            var bufferSize = (int)(pitch * thumbH);
 
-            // Pin a managed buffer for VLC to write pixel data into
-            var frameBuffer = new byte[bufferSize];
-            var handle = GCHandle.Alloc(frameBuffer, GCHandleType.Pinned);
-            var bufferPtr = handle.AddrOfPinnedObject();
-
-            byte[]? capturedFrame = null;
-            var frameReady = new ManualResetEventSlim(false);
-            var captureEnabled = false;
-
-            // Prevent delegates from being GC'd during native callbacks
-            MediaPlayer.LibVLCVideoLockCb lockCb = (IntPtr opaque, IntPtr planes) =>
-            {
-                Marshal.WriteIntPtr(planes, bufferPtr);
-                return IntPtr.Zero;
-            };
-            MediaPlayer.LibVLCVideoUnlockCb unlockCb = (IntPtr opaque, IntPtr picture, IntPtr planes) => { };
-            MediaPlayer.LibVLCVideoDisplayCb displayCb = (IntPtr opaque, IntPtr picture) =>
-            {
-                if (captureEnabled && !frameReady.IsSet)
-                {
-                    capturedFrame = new byte[bufferSize];
-                    Array.Copy(frameBuffer, capturedFrame, bufferSize);
-                    frameReady.Set();
-                }
-            };
-
-            using var player = new MediaPlayer(media);
-            player.SetVideoFormat("RV32", thumbW, thumbH, pitch);
-            player.SetVideoCallbacks(lockCb, unlockCb, displayCb);
-
-            player.Play();
-
-            // Wait for playback to actually start
-            if (!SpinWait.SpinUntil(() => player.IsPlaying, TimeSpan.FromSeconds(3)))
-            {
-                player.Stop();
-                handle.Free();
-                return GeneratePlaceholderThumbnail(targetWidth);
-            }
-
-            // Seek to the requested offset
-            var duration = media.Duration; // milliseconds
-            if (duration > 0 && offset.TotalMilliseconds < duration && offset > TimeSpan.Zero)
-            {
-                player.Position = (float)(offset.TotalMilliseconds / duration);
-                Thread.Sleep(300); // Let VLC decode at the new position
-            }
-            else if (duration > 2000)
-            {
-                // For short videos, just go 10% in
-                player.Position = 0.1f;
-                Thread.Sleep(200);
-            }
-
-            // Enable capture and wait for the next fully decoded frame
-            captureEnabled = true;
-            frameReady.Wait(TimeSpan.FromSeconds(5));
-
-            // Stop player — after this, no more callbacks
-            player.Stop();
-
-            // Keep delegate references alive until after Stop()
-            GC.KeepAlive(lockCb);
-            GC.KeepAlive(unlockCb);
-            GC.KeepAlive(displayCb);
-
-            handle.Free();
-
-            if (capturedFrame == null)
+            var capturedFrame = CaptureFrame(media, offset, thumbW, thumbH, pitch, bufferSize);
+            if (capturedFrame is null)
                 return GeneratePlaceholderThumbnail(targetWidth);
 
-            // Convert RV32 (BGRA) frame data to Avalonia Bitmap via SkiaSharp
-            var skInfo = new SKImageInfo((int)thumbW, (int)thumbH, SKColorType.Bgra8888, SKAlphaType.Opaque);
-            using var skBitmap = new SKBitmap(skInfo);
-            Marshal.Copy(capturedFrame, 0, skBitmap.GetPixels(), capturedFrame.Length);
-
-            using var image = SKImage.FromBitmap(skBitmap);
-            using var data = image.Encode(SKEncodedImageFormat.Jpeg, 85);
-            using var ms = new MemoryStream();
-            data.SaveTo(ms);
-            ms.Seek(0, SeekOrigin.Begin);
-            return new Bitmap(ms);
+            return FrameToBitmap(capturedFrame, (int)thumbW, (int)thumbH);
         }
         catch
         {
@@ -159,10 +103,103 @@ public class VideoService : IVideoService
         }
     }
 
-
+    private static bool TryGetVideoSize(Media media, out uint width, out uint height)
+    {
+        var videoTrack = media.Tracks.FirstOrDefault(t => t.TrackType == TrackType.Video);
+        width = videoTrack.Data.Video.Width;
+        height = videoTrack.Data.Video.Height;
+        return width > 0 && height > 0;
+    }
 
     /// <summary>
-    /// Generates a styled placeholder thumbnail when frame extraction fails.
+    /// Plays the media headlessly into a pinned buffer and copies out the first decoded frame
+    /// at the requested position.
+    /// </summary>
+    private byte[]? CaptureFrame(Media media, TimeSpan offset, uint thumbW, uint thumbH, uint pitch, int bufferSize)
+    {
+        var frameBuffer = new byte[bufferSize];
+        var handle = GCHandle.Alloc(frameBuffer, GCHandleType.Pinned);
+        var bufferPtr = handle.AddrOfPinnedObject();
+
+        byte[]? capturedFrame = null;
+        var frameReady = new ManualResetEventSlim(false);
+        var captureEnabled = false;
+
+        MediaPlayer.LibVLCVideoLockCb lockCb = (_, planes) =>
+        {
+            Marshal.WriteIntPtr(planes, bufferPtr);
+            return IntPtr.Zero;
+        };
+        MediaPlayer.LibVLCVideoUnlockCb unlockCb = (_, _, _) => { };
+        MediaPlayer.LibVLCVideoDisplayCb displayCb = (_, _) =>
+        {
+            if (captureEnabled && !frameReady.IsSet)
+            {
+                capturedFrame = new byte[bufferSize];
+                Array.Copy(frameBuffer, capturedFrame, bufferSize);
+                frameReady.Set();
+            }
+        };
+
+        using var player = new MediaPlayer(media);
+        player.SetVideoFormat("RV32", thumbW, thumbH, pitch);
+        player.SetVideoCallbacks(lockCb, unlockCb, displayCb);
+        player.Play();
+
+        try
+        {
+            if (!SpinWait.SpinUntil(() => player.IsPlaying, TimeSpan.FromSeconds(3)))
+                return null;
+
+            SeekForThumbnail(player, media.Duration, offset);
+
+            captureEnabled = true;
+            frameReady.Wait(TimeSpan.FromSeconds(5));
+            player.Stop();
+
+            // Delegates must stay alive until after Stop() returns.
+            GC.KeepAlive(lockCb);
+            GC.KeepAlive(unlockCb);
+            GC.KeepAlive(displayCb);
+
+            return capturedFrame;
+        }
+        finally
+        {
+            handle.Free();
+        }
+    }
+
+    private static void SeekForThumbnail(MediaPlayer player, long durationMs, TimeSpan offset)
+    {
+        if (durationMs > 0 && offset > TimeSpan.Zero && offset.TotalMilliseconds < durationMs)
+        {
+            player.Position = (float)(offset.TotalMilliseconds / durationMs);
+            Thread.Sleep(300); // Let VLC decode at the new position.
+        }
+        else if (durationMs > 2000)
+        {
+            player.Position = 0.1f; // Short video — grab an early frame.
+            Thread.Sleep(200);
+        }
+    }
+
+    private static Bitmap FrameToBitmap(byte[] frame, int width, int height)
+    {
+        var info = new SKImageInfo(width, height, SKColorType.Bgra8888, SKAlphaType.Opaque);
+        using var skBitmap = new SKBitmap(info);
+        Marshal.Copy(frame, 0, skBitmap.GetPixels(), frame.Length);
+
+        using var image = SKImage.FromBitmap(skBitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Jpeg, 85);
+        using var ms = new MemoryStream();
+        data.SaveTo(ms);
+        ms.Position = 0;
+        return new Bitmap(ms);
+    }
+
+    /// <summary>
+    /// Draws a dark gradient with a play glyph for videos whose frame can't be captured.
     /// </summary>
     private static Bitmap GeneratePlaceholderThumbnail(int targetWidth)
     {
@@ -176,7 +213,7 @@ public class VideoService : IVideoService
             Shader = SKShader.CreateLinearGradient(
                 new SKPoint(0, 0),
                 new SKPoint(targetWidth, height),
-                new[] { new SKColor(30, 30, 40), new SKColor(50, 50, 65) },
+                [new SKColor(30, 30, 40), new SKColor(50, 50, 65)],
                 SKShaderTileMode.Clamp),
         };
         canvas.DrawRect(0, 0, targetWidth, height, gradientPaint);
@@ -200,7 +237,7 @@ public class VideoService : IVideoService
             Style = SKPaintStyle.Fill,
         };
         var triSize = radius * 0.55f;
-        var path = new SKPath();
+        using var path = new SKPath();
         path.MoveTo(cx - triSize * 0.4f, cy - triSize);
         path.LineTo(cx - triSize * 0.4f, cy + triSize);
         path.LineTo(cx + triSize * 0.8f, cy);
@@ -211,7 +248,7 @@ public class VideoService : IVideoService
         using var data = image.Encode(SKEncodedImageFormat.Jpeg, 80);
         using var ms = new MemoryStream();
         data.SaveTo(ms);
-        ms.Seek(0, SeekOrigin.Begin);
+        ms.Position = 0;
         return new Bitmap(ms);
     }
 

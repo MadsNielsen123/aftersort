@@ -1,5 +1,6 @@
 using AfterSort.Services;
 using AfterSort.ViewModels;
+using AfterSort.ViewModels.Components;
 using AfterSort.ViewModels.Pages;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -13,9 +14,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IStorageService, StorageService>();
         services.AddSingleton<ISortService, SortService>();
         services.AddSingleton<IVideoService, VideoService>();
+        services.AddSingleton<IImageService, ImageService>();
         services.AddSingleton<MainWindowViewModel>();
 
         // TRANSIENTS
         services.AddTransient<MainPageViewModel>();
+        services.AddTransient<VideoPlayerViewModel>();
     }
 }

@@ -5,8 +5,6 @@ namespace AfterSort.Models;
 /// </summary>
 public class FileMetadata
 {
-    #region Properties
-
     /// <summary>
     /// File size in bytes.
     /// </summary>
@@ -42,10 +40,6 @@ public class FileMetadata
     /// </summary>
     public bool IsReadOnly { get; init; }
 
-    #endregion
-
-    #region Methods
-
     /// <summary>
     /// Creates a <see cref="FileMetadata"/> from a <see cref="FileInfo"/>.
     /// </summary>
@@ -69,6 +63,4 @@ public class FileMetadata
         < 1024 * 1024 * 1024 => $"{bytes / (1024.0 * 1024):F1} MB",
         _ => $"{bytes / (1024.0 * 1024 * 1024):F2} GB",
     };
-
-    #endregion
 }

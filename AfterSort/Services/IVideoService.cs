@@ -1,16 +1,35 @@
 using Avalonia.Media.Imaging;
+using LibVLCSharp.Shared;
 
 namespace AfterSort.Services;
 
 /// <summary>
-/// Provides video thumbnail extraction and playback capabilities.
+/// Owns the single shared <see cref="LibVLC"/> instance and provides video thumbnail
+/// extraction plus playback object creation. Centralising LibVLC here keeps native
+/// initialisation and disposal in one place.
 /// </summary>
 public interface IVideoService : IDisposable
 {
     /// <summary>
-    /// Extracts a thumbnail frame from a video file at the specified time offset.
-    /// Falls back to the first available frame if the offset is beyond the video duration.
-    /// Returns null if extraction fails.
+    /// True when the extension (including the leading dot) is a playable video format.
+    /// </summary>
+    bool IsSupported(string extension);
+
+    /// <summary>
+    /// Extracts a thumbnail frame at the given offset, falling back to an early frame for short
+    /// videos and to a styled placeholder when extraction fails. Returns null only if VLC is missing.
     /// </summary>
     Bitmap? ExtractThumbnail(string videoPath, TimeSpan offset, int targetWidth = 400);
+
+    /// <summary>
+    /// Creates a playback-configured <see cref="MediaPlayer"/> on the shared instance,
+    /// or null when LibVLC is unavailable.
+    /// </summary>
+    MediaPlayer? CreatePlayer();
+
+    /// <summary>
+    /// Creates a <see cref="Media"/> for the given path on the shared instance,
+    /// or null when LibVLC is unavailable.
+    /// </summary>
+    Media? CreateMedia(string path);
 }

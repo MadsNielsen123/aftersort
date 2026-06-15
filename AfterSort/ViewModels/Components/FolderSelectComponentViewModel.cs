@@ -6,11 +6,6 @@ namespace AfterSort.ViewModels.Components;
 
 public partial class FolderSelectComponentViewModel : ViewModelBase
 {
-    #region Fields
-    #endregion
-
-    #region Properties
-
     [ObservableProperty]
     public partial string Title { get; set; } = "Folders";
 
@@ -27,16 +22,6 @@ public partial class FolderSelectComponentViewModel : ViewModelBase
     /// Set this from the parent view model to control which item type gets created.
     /// </summary>
     public Func<Task<ViewModelBase?>>? ItemFactory { get; set; }
-
-    #endregion
-
-    #region Constructors
-    #endregion
-
-    #region Lifecycle
-    #endregion
-
-    #region Methods
 
     /// <summary>
     /// Adds a new item via the <see cref="ItemFactory"/> delegate.
@@ -68,6 +53,4 @@ public partial class FolderSelectComponentViewModel : ViewModelBase
         SelectedItem = null;
         Items.Remove(itemToRemove);
     }
-
-    #endregion
 }
