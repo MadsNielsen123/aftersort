@@ -106,16 +106,13 @@ public partial class VideoPlayerViewModel : ViewModelBase, IDisposable
         _media = media;
         _player.PositionChanged += OnPlayerPositionChanged;
         _player.EndReached += OnEndReached;
-        Player = _player;
+        Player = _player; // Bind to XAML so VLC can start decoding.
 
         _player.Play(media);
-        IsActive = true;
         IsPlaying = autoPlay;
 
-        if (autoPlay && position <= 0f)
-            return;
-
-        // Wait for playback to actually begin, then pause and/or seek to the requested position.
+        // Wait for VLC to actually decode and start rendering before showing the VideoView.
+        // This prevents a black flash from the native window appearing before content is ready.
         var target = _player;
         Task.Run(async () =>
         {
@@ -124,6 +121,13 @@ public partial class VideoPlayerViewModel : ViewModelBase, IDisposable
 
             if (target is not { IsPlaying: true })
                 return;
+
+            // VLC is now rendering frames — safe to show the VideoView.
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (_player == target) // Guard against navigation during wait.
+                    IsActive = true;
+            });
 
             if (!autoPlay)
                 target.Pause();

@@ -143,9 +143,9 @@
                             <Panel IsVisible="{Binding IsCurrentFileVideo}">
                                 <Viewbox Stretch="Uniform" x:Name="VideoViewbox">
                                     <Panel>
-                                        <!-- The thumbnail provides the exact native aspect ratio size -->
-                                        <Image Source="{Binding PreviewImage}" 
-                                               Stretch="None" />
+                                        <!-- Thumbnail at native pixel size sets the aspect ratio.
+                                             Always rendered (provides layout); VLC covers it when active. -->
+                                        <Image Source="{Binding PreviewImage}" Stretch="None"/>
                                         
                                         <!-- LibVLCSharp Video Player overlays the exact thumbnail bounds -->
                                         <vlc:VideoView MediaPlayer="{Binding VideoPlayer.Player}"
@@ -155,7 +155,7 @@
                                     </Panel>
                                 </Viewbox>
 
-                                <!-- Clickable overlay exactly over the video area -->
+                                <!-- Popup sits above the native VLC surface for play/pause clicks while active -->
                                 <Popup IsOpen="{Binding VideoPlayer.IsActive}"
                                        PlacementTarget="{Binding #VideoViewbox}"
                                        Placement="Center"
@@ -169,27 +169,32 @@
                                             BorderThickness="0"
                                             Padding="0"
                                             Cursor="Hand">
+                                        <Button.Styles>
+                                            <Style Selector="Button:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+                                                <Setter Property="Background" Value="Transparent"/>
+                                            </Style>
+                                            <Style Selector="Button:pressed /template/ ContentPresenter#PART_ContentPresenter">
+                                                <Setter Property="Background" Value="Transparent"/>
+                                            </Style>
+                                        </Button.Styles>
                                         <Panel>
-                                            <!-- Always visible invisible rectangle forces Avalonia to keep this hit-testable -->
                                             <Rectangle Fill="#01000000" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
-                                            
                                             <Panel HorizontalAlignment="Center"
                                                    VerticalAlignment="Center"
                                                    IsVisible="{Binding !VideoPlayer.IsPlaying}">
-                                                <!-- Scaled play button overlay inside the Viewbox -->
                                                 <Border Background="#80000000"
                                                         CornerRadius="100"
-                                                        Width="160" Height="160"/>
+                                                        Width="80" Height="80"/>
                                                 <PathIcon Data="M8 5v14l11-7z" 
-                                                          Width="60" Height="60" 
+                                                          Width="30" Height="30" 
                                                           Foreground="White"
-                                                          Margin="12,0,0,0"/>
+                                                          Margin="6,0,0,0"/>
                                             </Panel>
                                         </Panel>
                                     </Button>
                                 </Popup>
                                 
-                                <!-- Original fallback button for when video is NOT active (shows the thumbnail play button) -->
+                                <!-- Play button overlay when video is NOT active (over the thumbnail) -->
                                 <Button HorizontalAlignment="Stretch"
                                         VerticalAlignment="Stretch"
                                         Command="{Binding VideoPlayer.ToggleCommand}"
@@ -198,17 +203,25 @@
                                         Padding="0"
                                         Cursor="Hand"
                                         IsVisible="{Binding !VideoPlayer.IsActive}">
+                                    <Button.Styles>
+                                        <Style Selector="Button:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+                                            <Setter Property="Background" Value="Transparent"/>
+                                        </Style>
+                                        <Style Selector="Button:pressed /template/ ContentPresenter#PART_ContentPresenter">
+                                            <Setter Property="Background" Value="Transparent"/>
+                                        </Style>
+                                    </Button.Styles>
                                     <Panel>
                                         <Rectangle Fill="#01000000" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
                                         <Panel HorizontalAlignment="Center"
                                                VerticalAlignment="Center">
                                             <Border Background="#80000000"
                                                     CornerRadius="100"
-                                                    Width="160" Height="160"/>
+                                                    Width="80" Height="80"/>
                                             <PathIcon Data="M8 5v14l11-7z" 
-                                                      Width="60" Height="60" 
+                                                      Width="30" Height="30" 
                                                       Foreground="White"
-                                                      Margin="12,0,0,0"/>
+                                                      Margin="6,0,0,0"/>
                                         </Panel>
                                     </Panel>
                                 </Button>

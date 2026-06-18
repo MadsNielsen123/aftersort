@@ -108,7 +108,27 @@ public class VideoService : IVideoService
         var videoTrack = media.Tracks.FirstOrDefault(t => t.TrackType == TrackType.Video);
         width = videoTrack.Data.Video.Width;
         height = videoTrack.Data.Video.Height;
-        return width > 0 && height > 0;
+
+        if (width == 0 || height == 0)
+            return false;
+
+        // Apply SAR (Sample Aspect Ratio) correction for anamorphic video.
+        var sarNum = videoTrack.Data.Video.SarNum;
+        var sarDen = videoTrack.Data.Video.SarDen;
+        if (sarNum > 0 && sarDen > 0 && sarNum != sarDen)
+            width = (uint)(width * sarNum / sarDen);
+
+        // Swap dimensions for 90°/270° rotations (common in iPhone recordings).
+        var orientation = videoTrack.Data.Video.Orientation;
+        if (orientation is VideoOrientation.LeftTop
+            or VideoOrientation.RightTop
+            or VideoOrientation.RightBottom
+            or VideoOrientation.LeftBottom)
+        {
+            (width, height) = (height, width);
+        }
+
+        return true;
     }
 
     /// <summary>

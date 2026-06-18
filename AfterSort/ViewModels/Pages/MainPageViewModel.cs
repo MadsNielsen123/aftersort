@@ -700,7 +700,7 @@ public partial class MainPageViewModel : ViewModelBase
                 return _imageService.LoadThumbnail(file.FullPath, 400);
 
             if (file.IsVideo)
-                return _videoService.ExtractThumbnail(file.FullPath, TimeSpan.FromSeconds(5), 400);
+                return _videoService.ExtractThumbnail(file.FullPath, TimeSpan.FromSeconds(0.5), 400);
 
             using var reader = new StreamReader(file.FullPath);
             var buffer = new char[3000];
