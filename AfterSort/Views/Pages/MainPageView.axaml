@@ -321,6 +321,8 @@
                                  VerticalAlignment="Center"
                                  FontSize="13"
                                  Padding="4,4"
+                                 KeyDown="FileNumberInput_KeyDown"
+                                 LostFocus="FileNumberInput_LostFocus"
                                  x:Name="FileNumberInput"/>
                         <TextBlock Text="/"
                                    Foreground="{DynamicResource PrimaryText}"

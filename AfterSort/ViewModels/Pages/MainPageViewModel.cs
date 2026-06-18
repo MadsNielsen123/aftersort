@@ -315,6 +315,7 @@ public partial class MainPageViewModel : ViewModelBase
         if (IsUnsupportedImageFormat(file))
         {
             ShowUnsupported(file);
+            UpdateNeighborPreviews();
             _ = Task.Run(() => PreloadNeighborsAsync(currentIndex, token), token);
             return;
         }
@@ -322,6 +323,7 @@ public partial class MainPageViewModel : ViewModelBase
         if (file.IsImage && _previewCache.TryGetValue(file.FullPath, out var cachedFull))
         {
             ShowImage(cachedFull, loadingFull: false);
+            UpdateNeighborPreviews();
             _ = Task.Run(() => PreloadNeighborsAsync(currentIndex, token), token);
             return;
         }
@@ -844,16 +846,19 @@ public partial class MainPageViewModel : ViewModelBase
         if (IsUnsupportedImageFormat(file))
         {
             ShowUnsupported(file);
+            UpdateNeighborPreviews();
             return;
         }
 
         if (file.IsImage && _previewCache.TryGetValue(file.FullPath, out var cachedFull))
         {
             ShowImage(cachedFull, loadingFull: false);
+            UpdateNeighborPreviews();
             return;
         }
 
         ShowPreloadOrPlaceholder(file);
+        UpdateNeighborPreviews();
     }
 
     [RelayCommand]
