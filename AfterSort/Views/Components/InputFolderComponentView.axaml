@@ -12,17 +12,30 @@
     <Border Background="{DynamicResource Background2}"
             CornerRadius="4"
             Padding="8,6"
-            ToolTip.Tip="{Binding FolderPath}"
-            Classes.selected="{Binding $parent[ListBoxItem].IsSelected}">
+            ToolTip.Tip="{Binding FolderPath}">
         <Border.Styles>
-            <Style Selector="Border.selected">
-                <Setter Property="Background" Value="{DynamicResource Background3}"/>
-                <Setter Property="BorderBrush" Value="{DynamicResource PrimaryText}"/>
-                <Setter Property="BorderThickness" Value="1"/>
+            <Style Selector="Button.icon">
+                <Setter Property="Width" Value="20"/>
+                <Setter Property="Height" Value="20"/>
+                <Setter Property="Padding" Value="0"/>
+                <Setter Property="Margin" Value="4,0,0,0"/>
+                <Setter Property="Background" Value="Transparent"/>
+                <Setter Property="BorderThickness" Value="0"/>
+                <Setter Property="VerticalAlignment" Value="Center"/>
+                <Setter Property="Cursor" Value="Hand"/>
+            </Style>
+            <Style Selector="Button.icon PathIcon">
+                <Setter Property="Width" Value="11"/>
+                <Setter Property="Height" Value="11"/>
+                <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+                <Setter Property="Opacity" Value="0.6"/>
+            </Style>
+            <Style Selector="Button.icon:pointerover PathIcon">
+                <Setter Property="Opacity" Value="1"/>
             </Style>
         </Border.Styles>
 
-        <Grid ColumnDefinitions="*, Auto, Auto">
+        <Grid ColumnDefinitions="*, Auto, Auto, Auto, Auto">
 
             <!-- Folder name (left-aligned, ellipsis on overflow) -->
             <TextBlock Grid.Column="0"
@@ -51,6 +64,21 @@
                       VerticalAlignment="Center"
                       Margin="6,0,0,0"
                       IsVisible="{Binding IsCompleted}"/>
+
+            <!-- Folder settings -->
+            <Button Grid.Column="3"
+                    Classes="icon"
+                    ToolTip.Tip="Folder settings">
+                <PathIcon Data="{x:Static icons:AppIcons+Action.Settings}"/>
+            </Button>
+
+            <!-- Remove folder -->
+            <Button Grid.Column="4"
+                    Classes="icon"
+                    Command="{Binding RemoveCommand}"
+                    ToolTip.Tip="Remove folder">
+                <PathIcon Data="{x:Static icons:AppIcons+Action.Close}"/>
+            </Button>
 
         </Grid>
     </Border>

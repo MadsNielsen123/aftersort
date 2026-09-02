@@ -21,6 +21,16 @@ public partial class VideoPlayerViewModel : ViewModelBase, IDisposable
     // Guards the feedback loop when Position is updated from the player rather than the user.
     private bool _suppressSeek;
 
+    /// <summary>True once playback has parked on the final frame; the next play restarts from 0.</summary>
+    private bool _reachedEnd;
+
+    /// <summary>
+    /// How close to the end we pause pre-emptively. Letting VLC actually reach the end puts the
+    /// player in a dead state that can't be resumed or seeked, so we stop just short of it and
+    /// hold the last frame instead.
+    /// </summary>
+    private const long EndOfVideoMarginMs = 250;
+
     public VideoPlayerViewModel(IVideoService videoService)
     {
         _videoService = videoService;
@@ -61,6 +71,13 @@ public partial class VideoPlayerViewModel : ViewModelBase, IDisposable
         if (_path is null)
             return;
 
+        // Parked on the last frame — wind back to the start and play again.
+        if (_reachedEnd)
+        {
+            Replay();
+            return;
+        }
+
         if (_player is { IsPlaying: true })
         {
             _player.Pause();
@@ -80,10 +97,33 @@ public partial class VideoPlayerViewModel : ViewModelBase, IDisposable
         StartPlayback(position: 0f, autoPlay: true);
     }
 
+    /// <summary>
+    /// Restarts playback from the beginning after the video has parked on its final frame.
+    /// Reuses the paused player when possible, and rebuilds it if VLC did reach its end state.
+    /// </summary>
+    private void Replay()
+    {
+        _reachedEnd = false;
+
+        if (_player is { Media: not null } player && player.State is not (VLCState.Ended or VLCState.Stopped or VLCState.Error))
+        {
+            player.Position = 0f;
+            player.Play();
+            IsPlaying = true;
+            IsActive = true;
+            return;
+        }
+
+        Stop();
+        StartPlayback(position: 0f, autoPlay: true);
+    }
+
     partial void OnPositionChanged(float value)
     {
         if (_suppressSeek)
             return;
+
+        _reachedEnd = false; // Scrubbing away from the end re-arms normal play/pause.
 
         if (_player is not null)
             _player.Position = value;
@@ -161,6 +201,7 @@ public partial class VideoPlayerViewModel : ViewModelBase, IDisposable
 
         IsPlaying = false;
         IsActive = false;
+        _reachedEnd = false;
         SetPositionSilently(0f);
         TimeText = "0:00 / 0:00";
     }
@@ -170,24 +211,36 @@ public partial class VideoPlayerViewModel : ViewModelBase, IDisposable
         Dispatcher.UIThread.Post(() =>
         {
             SetPositionSilently(e.Position);
-            if (_player is not null)
-            {
-                var current = TimeSpan.FromMilliseconds(_player.Time);
-                var total = TimeSpan.FromMilliseconds(_player.Length);
-                TimeText = $"{FormatTime(current)} / {FormatTime(total)}";
-            }
+            if (_player is null)
+                return;
+
+            var current = TimeSpan.FromMilliseconds(_player.Time);
+            var total = TimeSpan.FromMilliseconds(_player.Length);
+            TimeText = $"{FormatTime(current)} / {FormatTime(total)}";
+
+            // Pause on the final frame rather than letting VLC run into its unrecoverable end state.
+            if (IsPlaying && _player.Length > EndOfVideoMarginMs * 4 && _player.Length - _player.Time <= EndOfVideoMarginMs)
+                PauseAtEnd();
         });
+    }
+
+    private void PauseAtEnd()
+    {
+        _reachedEnd = true;
+        IsPlaying = false;
+        _player?.SetPause(true);
     }
 
     private void OnEndReached(object? sender, EventArgs e)
     {
+        // Fallback for when VLC ran past our margin (very short clips, or a stalled position feed).
         // LibVLC requires player operations triggered from EndReached to be dispatched off its event thread.
         Dispatcher.UIThread.Post(() =>
         {
+            _reachedEnd = true;
             IsPlaying = false;
-            IsActive = false; // Reveals the thumbnail again; the player stays loaded for replay.
-            SetPositionSilently(0f);
-            TimeText = "0:00 / 0:00";
+            IsActive = false; // The ended player renders nothing, so fall back to the thumbnail.
+            SetPositionSilently(1f);
         });
     }
 

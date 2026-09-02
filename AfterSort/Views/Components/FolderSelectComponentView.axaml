@@ -8,65 +8,71 @@
              x:DataType="vm:FolderSelectComponentViewModel"
              x:CompileBindings="True">
 
-    <Border Background="{DynamicResource AppBackground}" 
+    <Border Background="{DynamicResource AppBackground}"
             CornerRadius="2"
             BoxShadow="{DynamicResource BoxShadow1}">
 
-        <Grid RowDefinitions="Auto, *, Auto">
+        <Grid RowDefinitions="Auto, *">
             <Border Grid.Row="0"
-                    Background="{DynamicResource Background3}"
-                    Padding="5"
-                    Margin="0,0,0,10">
-
-                <Grid ColumnDefinitions="Auto, *, Auto">
-                    <TextBlock Grid.Column="0"
-                        Text="{Binding Title}"
-                        Foreground="{DynamicResource PrimaryText}"
-                        FontWeight="Bold"
-                        VerticalAlignment="Center"/>
-
-                    <Button Grid.Column="2" Content="Opt Btn"/>
-                </Grid>
-
-            </Border>
-                    
-
-            <ListBox Grid.Row="1"
-                     Margin="5"
-                     ItemsSource="{Binding Items}"
-                     SelectedItem="{Binding SelectedItem}"
-                     Background="Transparent"
-                     BorderThickness="0"
-                     Padding="0">
-                <ListBox.Styles>
-                    <Style Selector="ListBoxItem">
-                        <Setter Property="Padding" Value="0"/>
-                        <Setter Property="CornerRadius" Value="4"/>
-                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                    </Style>
-                </ListBox.Styles>
-                <ListBox.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <StackPanel Spacing="5"/>
-                    </ItemsPanelTemplate>
-                </ListBox.ItemsPanel>
-            </ListBox>
-
-            <Border Grid.Row="2"
                     Background="{DynamicResource Background3}"
                     Padding="5">
 
-                <Grid ColumnDefinitions="auto, auto, *, auto">
-
-                    <Button Grid.Column="0"
-                            Command="{Binding AddItemCommand}">+</Button>
-                    <Button Grid.Column="1"
-                            Command="{Binding RemoveItemCommand}">-</Button>
-                    <Button Grid.Column="3">Folder Settings</Button>
-
-                </Grid>
+                <TextBlock Text="{Binding Title}"
+                           Foreground="{DynamicResource PrimaryText}"
+                           FontWeight="Bold"
+                           VerticalAlignment="Center"/>
 
             </Border>
+
+            <!-- Folders, followed by the "add folder" skeleton tile. The tile carries its own top
+                 margin only when folders precede it, so on an empty list it lands exactly where the
+                 first folder will. -->
+            <ScrollViewer Grid.Row="1" Margin="5" VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+
+                    <ItemsControl ItemsSource="{Binding Items}"
+                                  IsVisible="{Binding HasItems}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Spacing="5"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+
+                    <Button Command="{Binding AddItemCommand}"
+                            Classes.stacked="{Binding HasItems}"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Stretch"
+                            Padding="0"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Cursor="Hand"
+                            ToolTip.Tip="Add folder">
+                        <Button.Styles>
+                            <Style Selector="Button.stacked">
+                                <Setter Property="Margin" Value="0,5,0,0"/>
+                            </Style>
+                            <Style Selector="Button:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+                                <Setter Property="Background" Value="Transparent"/>
+                            </Style>
+                            <Style Selector="Button:pressed /template/ ContentPresenter#PART_ContentPresenter">
+                                <Setter Property="Background" Value="Transparent"/>
+                            </Style>
+                        </Button.Styles>
+                        <Border Background="{DynamicResource Background2}"
+                                CornerRadius="4"
+                                Height="32">
+                            <TextBlock Text="+"
+                                       Foreground="{DynamicResource PrimaryText}"
+                                       Opacity="0.5"
+                                       FontSize="18"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"/>
+                        </Border>
+                    </Button>
+
+                </StackPanel>
+            </ScrollViewer>
 
         </Grid>
     </Border>

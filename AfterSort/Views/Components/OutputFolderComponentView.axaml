@@ -3,6 +3,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="using:AfterSort.ViewModels.Components"
+             xmlns:icons="using:AfterSort.Icons"
              mc:Ignorable="d" d:DesignWidth="230" d:DesignHeight="40"
              x:Class="AfterSort.Views.Components.OutputFolderComponentView"
              x:DataType="vm:OutputFolderComponentViewModel"
@@ -11,33 +12,128 @@
     <Border Background="{DynamicResource Background2}"
             CornerRadius="4"
             Padding="8,6"
-            ToolTip.Tip="{Binding FolderPath}"
-            Classes.selected="{Binding $parent[ListBoxItem].IsSelected}">
+            ToolTip.Tip="{Binding FolderPath}">
         <Border.Styles>
-            <Style Selector="Border.selected">
-                <Setter Property="Background" Value="{DynamicResource Background3}"/>
-                <Setter Property="BorderBrush" Value="{DynamicResource PrimaryText}"/>
+            <Style Selector="Button.icon">
+                <Setter Property="Width" Value="20"/>
+                <Setter Property="Height" Value="20"/>
+                <Setter Property="Padding" Value="0"/>
+                <Setter Property="Margin" Value="4,0,0,0"/>
+                <Setter Property="Background" Value="Transparent"/>
+                <Setter Property="BorderThickness" Value="0"/>
+                <Setter Property="VerticalAlignment" Value="Center"/>
+                <Setter Property="Cursor" Value="Hand"/>
+            </Style>
+            <Style Selector="Button.icon PathIcon">
+                <Setter Property="Width" Value="11"/>
+                <Setter Property="Height" Value="11"/>
+                <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+                <Setter Property="Opacity" Value="0.6"/>
+            </Style>
+            <Style Selector="Button.icon:pointerover PathIcon">
+                <Setter Property="Opacity" Value="1"/>
+            </Style>
+
+            <!-- Membership box. Purely a rendering of the view model — the control itself never
+                 holds the state, so it can't drift out of sync with the folder. -->
+            <Style Selector="Button.toggle">
+                <Setter Property="Width" Value="22"/>
+                <Setter Property="Height" Value="22"/>
+                <Setter Property="Padding" Value="0"/>
+                <Setter Property="Margin" Value="0,0,4,0"/>
+                <Setter Property="Background" Value="Transparent"/>
+                <Setter Property="BorderThickness" Value="0"/>
+                <Setter Property="VerticalAlignment" Value="Center"/>
+                <Setter Property="Cursor" Value="Hand"/>
+            </Style>
+            <Style Selector="Button.toggle /template/ ContentPresenter#PART_ContentPresenter">
+                <Setter Property="Background" Value="Transparent"/>
+            </Style>
+            <Style Selector="Button.toggle:disabled">
+                <Setter Property="Opacity" Value="0.4"/>
+                <Setter Property="Cursor" Value="Arrow"/>
+            </Style>
+            <Style Selector="Border.box">
+                <Setter Property="Width" Value="16"/>
+                <Setter Property="Height" Value="16"/>
+                <Setter Property="CornerRadius" Value="3"/>
                 <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource Background5}"/>
+                <Setter Property="Background" Value="Transparent"/>
+                <Setter Property="HorizontalAlignment" Value="Center"/>
+                <Setter Property="VerticalAlignment" Value="Center"/>
+            </Style>
+            <Style Selector="Button.toggle:pointerover Border.box">
+                <Setter Property="BorderBrush" Value="{DynamicResource PrimaryText}"/>
+            </Style>
+            <Style Selector="Border.box.round">
+                <Setter Property="CornerRadius" Value="8"/>
+            </Style>
+            <Style Selector="Border.box.busy">
+                <Setter Property="Background" Value="{DynamicResource Background4}"/>
+            </Style>
+            <Style Selector="Border.box.on">
+                <Setter Property="Background" Value="{DynamicResource Success}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource Success}"/>
+            </Style>
+            <Style Selector="Border.box PathIcon">
+                <Setter Property="Width" Value="9"/>
+                <Setter Property="Height" Value="9"/>
+                <Setter Property="Foreground" Value="White"/>
             </Style>
         </Border.Styles>
 
-        <Grid ColumnDefinitions="*, Auto">
+        <Grid ColumnDefinitions="Auto, *, Auto, Auto, Auto">
+
+            <!-- Live membership box: filled means the current file lives in this folder.
+                 Locked while the copy/delete task for that file is still running. -->
+            <Button Grid.Column="0"
+                    Classes="toggle"
+                    Command="{Binding ToggleCommand}"
+                    IsEnabled="{Binding CanToggle}"
+                    ToolTip.Tip="Add or remove the current file">
+                <Border Classes="box"
+                        Classes.round="{Binding IsSingleMode}"
+                        Classes.busy="{Binding IsBusy}"
+                        Classes.on="{Binding IsChecked}">
+                    <PathIcon Data="{x:Static icons:AppIcons+Status.Checkmark}"
+                              IsVisible="{Binding IsChecked}"/>
+                </Border>
+            </Button>
 
             <!-- Folder name (left-aligned, ellipsis on overflow) -->
-            <TextBlock Grid.Column="0"
+            <TextBlock Grid.Column="1"
                        Text="{Binding FolderName}"
                        Foreground="{DynamicResource PrimaryText}"
                        VerticalAlignment="Center"
                        FontSize="13"
                        TextTrimming="CharacterEllipsis"/>
 
-            <!-- Select checkbox (right-aligned) -->
-            <CheckBox Grid.Column="1"
-                      IsChecked="{Binding IsSelected}"
+            <!-- Last failure for this folder -->
+            <PathIcon Grid.Column="2"
+                      Data="{x:Static icons:AppIcons+Status.Warning}"
+                      Foreground="{DynamicResource Error}"
+                      Width="12"
+                      Height="12"
                       VerticalAlignment="Center"
                       Margin="6,0,0,0"
-                      MinWidth="0"
-                      Padding="0"/>
+                      IsVisible="{Binding HasError}"
+                      ToolTip.Tip="{Binding ErrorMessage}"/>
+
+            <!-- Folder settings -->
+            <Button Grid.Column="3"
+                    Classes="icon"
+                    ToolTip.Tip="Folder settings">
+                <PathIcon Data="{x:Static icons:AppIcons+Action.Settings}"/>
+            </Button>
+
+            <!-- Remove folder -->
+            <Button Grid.Column="4"
+                    Classes="icon"
+                    Command="{Binding RemoveCommand}"
+                    ToolTip.Tip="Remove folder">
+                <PathIcon Data="{x:Static icons:AppIcons+Action.Close}"/>
+            </Button>
 
         </Grid>
     </Border>

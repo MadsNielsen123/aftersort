@@ -11,6 +11,7 @@
     <SolidColorBrush x:Key="PrimaryText" Color="#000" />
     <SolidColorBrush x:Key="SecondaryText" Color="#fff" />
 
+    <SolidColorBrush x:Key="Error" Color="#E53935" />
     <SolidColorBrush x:Key="Success" Color="#4CAF50" />
 
     <BoxShadows x:Key="BoxShadow1">0 4 10 0 #cccccc</BoxShadows>

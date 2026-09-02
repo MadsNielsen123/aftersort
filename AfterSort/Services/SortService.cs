@@ -1,55 +1,93 @@
 using AfterSort.Models;
-using AfterSort.ViewModels.Components;
 
 namespace AfterSort.Services;
 
-/// <summary>
-/// Default implementation of <see cref="ISortService"/>.
-/// Copies files to selected output folders and updates their sort state.
-/// </summary>
+/// <inheritdoc cref="ISortService"/>
 public class SortService : ISortService
 {
+    /// <summary>Suffix for in-progress copies, so a half-written file never looks "present".</summary>
+    private const string TempSuffix = ".aftersort-part";
+
     /// <inheritdoc/>
-    public async Task<int> SortFileAsync(FileItem file, IEnumerable<OutputFolderComponentViewModel> outputFolders)
+    public Task<HashSet<string>> ScanFolderAsync(string folderPath) => Task.Run(() =>
     {
-        var copiedCount = 0;
+        if (!Directory.Exists(folderPath))
+            throw new DirectoryNotFoundException($"Folder not found: {folderPath}");
 
-        foreach (var outputFolder in outputFolders)
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in Directory.EnumerateFiles(folderPath))
         {
-            if (!outputFolder.IsSelected)
-                continue;
-
-            var destinationPath = Path.Combine(outputFolder.FolderPath, file.Name);
-
-            // Don't overwrite if the file already exists
-            if (!File.Exists(destinationPath))
-            {
-                await Task.Run(() => File.Copy(file.FullPath, destinationPath));
-            }
-
-            // Track the output state
-            var existingState = file.OutputStates.FirstOrDefault(s => s.OutputFolder == outputFolder);
-            if (existingState is not null)
-            {
-                existingState.IsSaved = true;
-            }
-            else
-            {
-                file.OutputStates.Add(new FileOutputState
-                {
-                    OutputFolder = outputFolder,
-                    IsSaved = true,
-                });
-            }
-
-            copiedCount++;
+            var name = Path.GetFileName(path);
+            if (!IsInProgressArtifact(name))
+                names.Add(name);
         }
 
-        if (copiedCount > 0)
-        {
-            file.IsSorted = true;
-        }
+        return names;
+    });
 
-        return copiedCount;
+    /// <inheritdoc/>
+    public async Task CopyToFolderAsync(FileItem file, string folderPath, CancellationToken token = default)
+    {
+        if (!Directory.Exists(folderPath))
+            throw new DirectoryNotFoundException($"Folder not found: {folderPath}");
+
+        if (!File.Exists(file.FullPath))
+            throw new FileNotFoundException($"Source file no longer exists: {file.Name}");
+
+        var destination = Path.Combine(folderPath, file.Name);
+        if (string.Equals(destination, file.FullPath, StringComparison.OrdinalIgnoreCase))
+            return; // Source and destination are the same file — nothing to copy.
+
+        var temp = destination + TempSuffix;
+
+        try
+        {
+            await using (var source = new FileStream(file.FullPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true))
+            await using (var target = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true))
+            {
+                await source.CopyToAsync(target, token);
+            }
+
+            File.Move(temp, destination, overwrite: true);
+        }
+        catch
+        {
+            TryDelete(temp);
+            throw;
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task RemoveFromFolderAsync(FileItem file, string folderPath, CancellationToken token = default) => Task.Run(() =>
+    {
+        var destination = Path.Combine(folderPath, file.Name);
+        if (string.Equals(destination, file.FullPath, StringComparison.OrdinalIgnoreCase))
+            throw new IOException($"Refusing to delete the source file: {file.Name}");
+
+        if (File.Exists(destination))
+            File.Delete(destination);
+
+        TryDelete(destination + TempSuffix);
+    }, token);
+
+    /// <inheritdoc/>
+    public bool ExistsInFolder(FileItem file, string folderPath) =>
+        File.Exists(Path.Combine(folderPath, file.Name));
+
+    /// <inheritdoc/>
+    public bool IsInProgressArtifact(string fileName) =>
+        fileName.EndsWith(TempSuffix, StringComparison.OrdinalIgnoreCase);
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch
+        {
+            // Best effort cleanup — never mask the original failure.
+        }
     }
 }

@@ -6,22 +6,27 @@ namespace AfterSort.ViewModels.Components;
 
 public partial class FolderSelectComponentViewModel : ViewModelBase
 {
+    public FolderSelectComponentViewModel()
+    {
+        Items.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasItems));
+    }
+
     [ObservableProperty]
     public partial string Title { get; set; } = "Folders";
 
-    public ObservableCollection<ViewModelBase> Items { get; } = [];
+    public ObservableCollection<FolderItemViewModelBase> Items { get; } = [];
 
     /// <summary>
-    /// The currently selected item in the list.
+    /// False while the list is empty. The empty folder list is then hidden entirely, so the "+"
+    /// tile sits exactly where the first folder will appear once it's filled in.
     /// </summary>
-    [ObservableProperty]
-    public partial ViewModelBase? SelectedItem { get; set; }
+    public bool HasItems => Items.Count > 0;
 
     /// <summary>
-    /// Factory that creates new items when the "+" button is pressed.
+    /// Factory that creates new items when the "+" tile is pressed.
     /// Set this from the parent view model to control which item type gets created.
     /// </summary>
-    public Func<Task<ViewModelBase?>>? ItemFactory { get; set; }
+    public Func<Task<FolderItemViewModelBase?>>? ItemFactory { get; set; }
 
     /// <summary>
     /// Adds a new item via the <see cref="ItemFactory"/> delegate.
@@ -33,24 +38,10 @@ public partial class FolderSelectComponentViewModel : ViewModelBase
             return;
 
         var newItem = await ItemFactory();
-        if (newItem is not null)
-        {
-            Items.Add(newItem);
-        }
-    }
-
-    /// <summary>
-    /// Removes the currently selected item from the list.
-    /// </summary>
-    [RelayCommand]
-    private void RemoveItem()
-    {
-        if (SelectedItem is null)
+        if (newItem is null)
             return;
 
-        var itemToRemove = SelectedItem;
-
-        SelectedItem = null;
-        Items.Remove(itemToRemove);
+        newItem.Owner = this;
+        Items.Add(newItem);
     }
 }

@@ -27,6 +27,12 @@ public partial class MainPageViewModel : ViewModelBase
     /// </summary>
     private readonly List<FileItem> _flatFileList = [];
 
+    /// <summary>
+    /// Files keyed by name, so a change in an output folder maps straight to the files it affects
+    /// without walking the whole queue. Rebuilt with <see cref="_flatFileList"/>.
+    /// </summary>
+    private readonly Dictionary<string, List<FileItem>> _filesByName = new(StringComparer.OrdinalIgnoreCase);
+
     // === Preview pipeline state ===
     private CancellationTokenSource? _navigationCts;
     private CancellationTokenSource? _debounceCts;
@@ -64,7 +70,7 @@ public partial class MainPageViewModel : ViewModelBase
     #region Properties
 
     public FolderSelectComponentViewModel InputFolders { get; }
-    public FolderSelectComponentViewModel DestFolders { get; }
+    public FolderSelectComponentViewModel OutputFolders { get; }
 
     /// <summary>Owns video playback for the current file.</summary>
     public VideoPlayerViewModel VideoPlayer { get; }
@@ -72,6 +78,15 @@ public partial class MainPageViewModel : ViewModelBase
     /// <summary>The currently active sort mode.</summary>
     [ObservableProperty]
     public partial SortMode CurrentSortMode { get; set; } = SortMode.Multiple;
+
+    partial void OnCurrentSortModeChanged(SortMode value)
+    {
+        foreach (var outputFolder in OutputFolderItems)
+            outputFolder.IsSingleMode = value == SortMode.Single;
+    }
+
+    private IEnumerable<OutputFolderComponentViewModel> OutputFolderItems =>
+        OutputFolders.Items.OfType<OutputFolderComponentViewModel>();
 
     /// <summary>Zero-based index into the flat file list.</summary>
     [ObservableProperty]
@@ -82,11 +97,12 @@ public partial class MainPageViewModel : ViewModelBase
 
     /// <summary>Total number of files in the current view.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CurrentFileNumber))]
     [NotifyPropertyChangedFor(nameof(HasCurrentFile))]
     public partial int TotalFileCount { get; set; }
 
-    /// <summary>1-based display number of the current file.</summary>
-    public int CurrentFileNumber => CurrentFileIndex + 1;
+    /// <summary>1-based display number of the current file, or 0 when there are no files.</summary>
+    public int CurrentFileNumber => TotalFileCount == 0 ? 0 : CurrentFileIndex + 1;
 
     /// <summary>Whether there is at least one file to display.</summary>
     public bool HasCurrentFile => TotalFileCount > 0;
@@ -108,6 +124,14 @@ public partial class MainPageViewModel : ViewModelBase
     /// <summary>Preview thumbnail for the next file in the queue.</summary>
     [ObservableProperty]
     public partial Bitmap? NextPreviewImage { get; set; }
+
+    /// <summary>The previous file in the queue — drives its sorted badge. Null at the start.</summary>
+    [ObservableProperty]
+    public partial FileItem? PreviousFile { get; set; }
+
+    /// <summary>The next file in the queue — drives its sorted badge. Null at the end.</summary>
+    [ObservableProperty]
+    public partial FileItem? NextFile { get; set; }
 
     /// <summary>Text content for non-image file preview. Null when the current file is an image.</summary>
     [ObservableProperty]
@@ -163,7 +187,7 @@ public partial class MainPageViewModel : ViewModelBase
         VideoPlayer.PropertyChanged += OnVideoPlayerPropertyChanged;
 
         InputFolders = new FolderSelectComponentViewModel { Title = "Input Folders" };
-        DestFolders = new FolderSelectComponentViewModel { Title = "Dest Folders" };
+        OutputFolders = new FolderSelectComponentViewModel { Title = "Output Folders" };
 
         InputFolders.ItemFactory = async () =>
         {
@@ -180,24 +204,22 @@ public partial class MainPageViewModel : ViewModelBase
             return vm;
         };
 
-        DestFolders.ItemFactory = async () =>
+        OutputFolders.ItemFactory = async () =>
         {
-            var result = await _storageService.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Select Destination Folder" });
-            return result is { Count: > 0 }
-                ? new OutputFolderComponentViewModel
-                {
-                    FolderName = result[0].Name,
-                    FolderPath = result[0].Path.LocalPath,
-                }
-                : null;
+            var result = await _storageService.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Select Output Folder" });
+            if (result is not { Count: > 0 })
+                return null;
+
+            return new OutputFolderComponentViewModel(_sortService)
+            {
+                FolderName = result[0].Name,
+                FolderPath = result[0].Path.LocalPath,
+                IsSingleMode = CurrentSortMode == SortMode.Single,
+            };
         };
 
         InputFolders.Items.CollectionChanged += OnInputFoldersChanged;
-        InputFolders.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(FolderSelectComponentViewModel.SelectedItem))
-                RebuildFlatFileList();
-        };
+        OutputFolders.Items.CollectionChanged += OnOutputFoldersChanged;
     }
 
     #endregion
@@ -230,20 +252,21 @@ public partial class MainPageViewModel : ViewModelBase
 
     private void OnInputFolderFilesAdded(object? sender, IEnumerable<FileItem> newFiles)
     {
-        var selectedInput = InputFolders.SelectedItem as InputFolderComponentViewModel;
-
-        // Append only when showing all folders, or when the sender is the selected folder.
-        if (selectedInput is not null && selectedInput != sender)
-            return;
+        var added = newFiles as IList<FileItem> ?? newFiles.ToList();
 
         var oldCount = _flatFileList.Count;
-        _flatFileList.AddRange(newFiles);
+        _flatFileList.AddRange(added);
+        IndexFiles(added);
         TotalFileCount = _flatFileList.Count;
+
+        foreach (var file in added)
+            RefreshSortedState(file);
 
         if (oldCount == 0 && TotalFileCount > 0)
         {
             CurrentFileIndex = 0;
             OnPropertyChanged(nameof(CurrentFile));
+            SyncOutputFolderStates();
             LoadCurrentFilePreview();
         }
 
@@ -252,25 +275,119 @@ public partial class MainPageViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Rebuilds the flat file list from the selected input folder, or all folders if none is selected.
+    /// Handles output folder changes — scans new folders for what they already contain and keeps
+    /// the app's sorted state in sync with them.
+    /// </summary>
+    private void OnOutputFoldersChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        foreach (var outputFolder in (e.NewItems ?? Array.Empty<object>()).OfType<OutputFolderComponentViewModel>())
+        {
+            outputFolder.FileStateChanged += OnOutputFolderFileStateChanged;
+            outputFolder.ContentChanged += OnOutputFolderContentChanged;
+            outputFolder.ContentsScanned += OnOutputFolderContentsScanned;
+            outputFolder.UserToggled += OnOutputFolderUserToggled;
+            outputFolder.SetCurrentFile(CurrentFile);
+            _ = outputFolder.ScanAsync();
+        }
+
+        foreach (var outputFolder in (e.OldItems ?? Array.Empty<object>()).OfType<OutputFolderComponentViewModel>())
+        {
+            outputFolder.FileStateChanged -= OnOutputFolderFileStateChanged;
+            outputFolder.ContentChanged -= OnOutputFolderContentChanged;
+            outputFolder.ContentsScanned -= OnOutputFolderContentsScanned;
+            outputFolder.UserToggled -= OnOutputFolderUserToggled;
+            outputFolder.Dispose();
+        }
+
+        RefreshAllSortedState();
+    }
+
+    private void OnOutputFolderContentsScanned(object? sender, EventArgs e) => RefreshAllSortedState();
+
+    private void OnOutputFolderFileStateChanged(object? sender, FileItem file) => RefreshSortedState(file);
+
+    /// <summary>A file appeared in or vanished from an output folder — update just the files it names.</summary>
+    private void OnOutputFolderContentChanged(object? sender, string fileName)
+    {
+        if (!_filesByName.TryGetValue(fileName, out var affected))
+            return;
+
+        foreach (var file in affected)
+            RefreshSortedState(file);
+    }
+
+    /// <summary>In Single mode, clicking an output folder box moves straight on to the next file.</summary>
+    private void OnOutputFolderUserToggled(object? sender, EventArgs e)
+    {
+        if (CurrentSortMode == SortMode.Single)
+            Navigate(1);
+    }
+
+    /// <summary>
+    /// Recomputes "does this file live in at least one output folder", adjusting its input folder's
+    /// counter by the difference rather than recounting the folder.
+    /// </summary>
+    private void RefreshSortedState(FileItem file)
+    {
+        var isSorted = OutputFolderItems.Any(o => o.Contains(file));
+        if (file.IsSorted == isSorted)
+            return;
+
+        file.IsSorted = isSorted;
+
+        if (file.ParentFolder is InputFolderComponentViewModel inputFolder)
+            inputFolder.SortedFiles += isSorted ? 1 : -1;
+    }
+
+    /// <summary>Full recount, for when the set of output folders or files changed underneath us.</summary>
+    private void RefreshAllSortedState()
+    {
+        var outputFolders = OutputFolderItems.ToList();
+
+        foreach (var file in _flatFileList)
+            file.IsSorted = outputFolders.Any(o => o.Contains(file));
+
+        foreach (var inputFolder in InputFolders.Items.OfType<InputFolderComponentViewModel>())
+            inputFolder.SortedFiles = inputFolder.Files.Count(f => f.IsSorted);
+    }
+
+    /// <summary>Points every output folder's box at the file now on screen.</summary>
+    private void SyncOutputFolderStates()
+    {
+        var file = CurrentFile;
+        foreach (var outputFolder in OutputFolderItems)
+            outputFolder.SetCurrentFile(file);
+    }
+
+    partial void OnCurrentFileIndexChanged(int value) => SyncOutputFolderStates();
+
+    /// <summary>Adds files to the by-name index used to map output folder changes back to files.</summary>
+    private void IndexFiles(IEnumerable<FileItem> files)
+    {
+        foreach (var file in files)
+        {
+            if (!_filesByName.TryGetValue(file.Name, out var sameName))
+                _filesByName[file.Name] = sameName = [];
+
+            sameName.Add(file);
+        }
+    }
+
+    /// <summary>
+    /// Rebuilds the flat file list from every input folder.
     /// </summary>
     private void RebuildFlatFileList()
     {
         var oldCurrentFile = CurrentFile;
 
         _flatFileList.Clear();
+        _flatFileList.AddRange(InputFolders.Items.OfType<InputFolderComponentViewModel>().SelectMany(f => f.Files));
 
-        if (InputFolders.SelectedItem is InputFolderComponentViewModel selectedInput)
-        {
-            _flatFileList.AddRange(selectedInput.Files);
-        }
-        else
-        {
-            var allFiles = InputFolders.Items.OfType<InputFolderComponentViewModel>().SelectMany(f => f.Files);
-            _flatFileList.AddRange(allFiles);
-        }
+        _filesByName.Clear();
+        IndexFiles(_flatFileList);
 
         TotalFileCount = _flatFileList.Count;
+        RefreshAllSortedState();
 
         var restoredIndex = oldCurrentFile is null ? -1 : _flatFileList.IndexOf(oldCurrentFile);
         CurrentFileIndex = restoredIndex >= 0 ? restoredIndex : 0;
@@ -280,6 +397,7 @@ public partial class MainPageViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasCurrentFile));
         OnPropertyChanged(nameof(CurrentFileNumber));
 
+        SyncOutputFolderStates();
         LoadCurrentFilePreview();
     }
 
@@ -301,6 +419,8 @@ public partial class MainPageViewModel : ViewModelBase
 
         var file = CurrentFile;
         var currentIndex = CurrentFileIndex;
+
+        SyncOutputFolderStates();
 
         // Point the video player at this file (or clear it), stopping any prior playback.
         VideoPlayer.SetSource(file?.IsVideo == true ? file.FullPath : null);
@@ -400,13 +520,11 @@ public partial class MainPageViewModel : ViewModelBase
     {
         var currentIndex = CurrentFileIndex;
 
-        PreviousPreviewImage = currentIndex - 1 >= 0
-            ? _flatFileList[currentIndex - 1].PreloadData as Bitmap
-            : null;
+        PreviousFile = currentIndex - 1 >= 0 ? _flatFileList[currentIndex - 1] : null;
+        NextFile = currentIndex + 1 < _flatFileList.Count ? _flatFileList[currentIndex + 1] : null;
 
-        NextPreviewImage = currentIndex + 1 < _flatFileList.Count
-            ? _flatFileList[currentIndex + 1].PreloadData as Bitmap
-            : null;
+        PreviousPreviewImage = PreviousFile?.PreloadData as Bitmap;
+        NextPreviewImage = NextFile?.PreloadData as Bitmap;
     }
 
     /// <summary>
@@ -768,12 +886,11 @@ public partial class MainPageViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Sorts the current file (copies to checked output folders) and navigates by <paramref name="direction"/>.
+    /// Moves by <paramref name="direction"/> in the queue. Copying is owned by the output
+    /// folder boxes, so navigating never touches the file system.
     /// </summary>
-    private void SortCurrentAndNavigate(int direction)
+    private void Navigate(int direction)
     {
-        SortCurrentFile();
-
         var newIndex = CurrentFileIndex + direction;
         if (newIndex < 0 || newIndex >= TotalFileCount)
             return;
@@ -809,38 +926,12 @@ public partial class MainPageViewModel : ViewModelBase
         }, debounceToken);
     }
 
-    private void SortCurrentFile()
-    {
-        var currentFile = CurrentFile;
-        if (currentFile is null || currentFile.IsSorted)
-            return;
-
-        var outputFolders = DestFolders.Items
-            .OfType<OutputFolderComponentViewModel>()
-            .Where(f => f.IsSelected)
-            .ToList();
-
-        if (!outputFolders.Any())
-            return;
-
-        // Mark sorted immediately for a snappy UI; copy in the background so navigation stays instant.
-        currentFile.IsSorted = true;
-        _ = Task.Run(async () =>
-        {
-            await _sortService.SortFileAsync(currentFile, outputFolders);
-            Dispatcher.UIThread.Post(() =>
-            {
-                if (currentFile.ParentFolder is InputFolderComponentViewModel inputFolder)
-                    inputFolder.SortedFiles = inputFolder.Files.Count(f => f.IsSorted);
-            });
-        });
-    }
-
     /// <summary>
     /// Shows whatever is already cached for a file — zero I/O, instant feedback during rapid navigation.
     /// </summary>
     private void ShowCachedPreviewInstant(FileItem file)
     {
+        SyncOutputFolderStates();
         VideoPlayer.SetSource(file.IsVideo ? file.FullPath : null);
 
         if (IsUnsupportedImageFormat(file))
@@ -862,10 +953,10 @@ public partial class MainPageViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void GoNext() => SortCurrentAndNavigate(1);
+    private void GoNext() => Navigate(1);
 
     [RelayCommand]
-    private void GoPrevious() => SortCurrentAndNavigate(-1);
+    private void GoPrevious() => Navigate(-1);
 
     /// <summary>Jump to a specific file by 1-based number.</summary>
     [RelayCommand]

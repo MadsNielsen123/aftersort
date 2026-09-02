@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Input;
+using AfterSort.Models;
 using AfterSort.ViewModels.Pages;
 
 namespace AfterSort.Views.Pages;
@@ -9,6 +10,15 @@ public partial class MainPageView : UserControl
     public MainPageView()
     {
         InitializeComponent();
+    }
+
+    /// <summary>
+    /// Mirrors the sort mode list selection onto the view model (list order matches the enum).
+    /// </summary>
+    private void SortMode_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (DataContext is MainPageViewModel vm && sender is ListBox list && list.SelectedIndex >= 0)
+            vm.CurrentSortMode = (SortMode)list.SelectedIndex;
     }
 
     /// <summary>
