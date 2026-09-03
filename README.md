@@ -3,8 +3,14 @@ Image Sorting
 
 ## Download
 
-Prebuilt, self-contained builds (no .NET install needed) are attached to each
-[release](https://github.com/MadsNielsen123/aftersort/releases):
+Prebuilt, self-contained builds (no .NET install needed) are on the
+[releases page](https://github.com/MadsNielsen123/aftersort/releases):
+
+- **Latest build (master)** — rebuilt automatically on every push. Always current,
+  but unreviewed.
+- **Tagged releases** (`v0.1.0`, ...) — fixed snapshots that never change.
+
+Each one attaches all four platforms:
 
 | Platform | File |
 |---|---|
@@ -27,9 +33,14 @@ placeholder thumbnails. Windows and macOS builds bundle their own libvlc.
 
 ## Releasing
 
-Push a tag; the `Release` workflow builds all four targets and publishes them.
+Pushing to `master` refreshes the rolling `latest` prerelease automatically —
+nothing to do.
+
+To cut a stable release, tag the commit:
 
 ```sh
 git tag v0.1.0
 git push origin v0.1.0
 ```
+
+The `Release` workflow builds all four targets and publishes them under that tag.
