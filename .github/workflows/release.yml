@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    # Every RID cross-publishes fine from one Linux runner, and Linux is the only
+    # host that sets the executable bit on the macOS/Linux apphosts.
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rid: [win-x64, linux-x64, osx-x64, osx-arm64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Resolve version
+        id: v
+        run: |
+          ref="${GITHUB_REF##*/}"
+          if [[ "$ref" == v* ]]; then echo "version=${ref#v}" >> "$GITHUB_OUTPUT"
+          else echo "version=0.0.0-dev.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"; fi
+
+      # Not single-file: LibVLC loads its plugins/ directory from disk next to the
+      # apphost, which a self-extracting bundle breaks.
+      - name: Publish
+        run: |
+          dotnet publish AfterSort/AfterSort.csproj \
+            -c Release \
+            -r ${{ matrix.rid }} \
+            --self-contained true \
+            -p:Version=${{ steps.v.outputs.version }} \
+            -o publish/${{ matrix.rid }}
+
+      - name: Package
+        id: pkg
+        run: |
+          set -euo pipefail
+          rid="${{ matrix.rid }}"
+          ver="${{ steps.v.outputs.version }}"
+          mkdir -p dist
+
+          if [[ "$rid" == osx-* ]]; then
+            app="stage/AfterSort.app"
+            mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+            cp -R "publish/$rid/." "$app/Contents/MacOS/"
+            cat > "$app/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>AfterSort</string>
+            <key>CFBundleDisplayName</key><string>AfterSort</string>
+            <key>CFBundleIdentifier</key><string>com.madsnielsen.aftersort</string>
+            <key>CFBundleVersion</key><string>$ver</string>
+            <key>CFBundleShortVersionString</key><string>$ver</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleExecutable</key><string>AfterSort</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          PLIST
+            name="aftersort-$ver-$rid.zip"
+            (cd stage && zip -qr "../dist/$name" AfterSort.app)
+          elif [[ "$rid" == win-* ]]; then
+            name="aftersort-$ver-$rid.zip"
+            (cd "publish/$rid" && zip -qr "../../dist/$name" .)
+          else
+            name="aftersort-$ver-$rid.tar.gz"
+            tar -czf "dist/$name" -C "publish/$rid" .
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.rid }}
+          path: dist/${{ steps.pkg.outputs.name }}
+
+  release:
+    needs: publish
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF##*/}" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "${GITHUB_REF##*/}" \
+            --generate-notes

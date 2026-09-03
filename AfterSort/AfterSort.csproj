@@ -5,7 +5,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationManifest Condition="('$(RuntimeIdentifier)' == '' And $([MSBuild]::IsOSPlatform('Windows'))) Or $(RuntimeIdentifier.StartsWith('win'))">app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
 
@@ -33,10 +33,14 @@
     <PackageReference Include="Avalonia.Svg.Skia" Version="11.3.0" />
     <PackageReference Include="Magick.NET-Q8-AnyCPU" Version="14.14.0" />
 
-    <!-- Video: LibVLC for thumbnails + playback (native libs via VideoLAN.LibVLC.Windows) -->
+    <!-- Video: LibVLC for thumbnails + playback. Native libs ship per-platform below;
+         Linux uses the system libvlc (VideoService degrades to placeholders if absent). -->
     <PackageReference Include="LibVLCSharp" Version="3.9.7.1" />
     <PackageReference Include="LibVLCSharp.Avalonia" Version="3.9.7.1" />
-    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" />
+    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1"
+                     Condition="('$(RuntimeIdentifier)' == '' And $([MSBuild]::IsOSPlatform('Windows'))) Or $(RuntimeIdentifier.StartsWith('win'))" />
+    <PackageReference Include="VideoLAN.LibVLC.Mac" Version="3.1.3.1"
+                     Condition="('$(RuntimeIdentifier)' == '' And $([MSBuild]::IsOSPlatform('OSX'))) Or $(RuntimeIdentifier.StartsWith('osx'))" />
   </ItemGroup>
 
   <ItemGroup>
