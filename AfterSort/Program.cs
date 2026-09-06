@@ -16,6 +16,12 @@ sealed class Program
     public static AppBuilder BuildAvaloniaApp()
         => AppBuilder.Configure<App>()
             .UsePlatformDetect()
+            // X11 defaults to window-manager decorations, which leave WindowDecorationMargin at
+            // zero and collapse the custom titlebar. Opt into Avalonia-drawn ones so Linux gets
+            // the same chrome as Windows. Still marked experimental in Avalonia 12.0.
+#pragma warning disable AVALONIA_X11_CSD
+            .With(new X11PlatformOptions { EnableDrawnDecorations = true })
+#pragma warning restore AVALONIA_X11_CSD
 #if DEBUG
             .WithDeveloperTools()
 #endif

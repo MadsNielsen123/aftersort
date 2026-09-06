@@ -46,9 +46,15 @@
               Background="{DynamicResource Background3}"
               WindowDecorationProperties.ElementRole="TitleBar">
 
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="15,0">
+            <!-- Windows/Linux put the caption buttons on the right, so the icon and title go
+                 left. macOS keeps its native traffic lights on the left and, per convention,
+                 a centered title with no icon. -->
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                        HorizontalAlignment="{OnPlatform Left, macOS=Center}"
+                        Margin="15,0">
                 <Image Source="/Assets/Images/Icons/Logo/aftersort-logo.ico"
-                       Width="16" Height="16" Margin="0,0,8,0" />
+                       Width="16" Height="16" Margin="0,0,8,0"
+                       IsVisible="{OnPlatform True, macOS=False}" />
                 <TextBlock Text="{Binding $parent[Window].Title}"
                            Foreground="{DynamicResource PrimaryText}"
                            FontSize="12"
